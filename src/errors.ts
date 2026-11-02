@@ -1,5 +1,8 @@
 export type GatewayErrorCode =
   | 'invalid_request'
+  | 'unauthorized'
+  | 'forbidden'
+  | 'rate_limited'
   | 'unknown_session'
   | 'unknown_channel'
   | 'bad_state'
@@ -30,6 +33,9 @@ export type GatewayErrorCode =
   | 'contention';
 
 const STATUS: Partial<Record<GatewayErrorCode, number>> = {
+  unauthorized: 401,
+  forbidden: 403,
+  rate_limited: 429,
   unknown_session: 404,
   unknown_channel: 404,
   payment_required: 402,

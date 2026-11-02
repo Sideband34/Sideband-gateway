@@ -4,6 +4,17 @@ import { z } from 'zod';
 import { AmountError, formatAmount, parseAmount } from '@sideband/channels';
 import { GatewayError } from '../errors.js';
 import type { ProviderGateway } from '../gateway.js';
+import { requireAdmin, requireSession, sessionToken } from './auth.js';
+import { RateLimiter } from './ratelimit.js';
+
+export interface HttpOptions {
+  /** HMAC secret for session capability tokens. Required. */
+  sessionSecret: Buffer;
+  /** Static admin token; if absent the admin endpoints are disabled. */
+  adminToken?: string;
+  /** Defaults to 60 requests burst, 20/s refill per client address. */
+  limiter?: RateLimiter;
+}
 
 export const SCHEMA_VERSION = 1;
 const MAX_BODY_BYTES = 16 * 1024; // same bound as sideband-protocol frames
@@ -109,7 +120,9 @@ const intentJson = (i: {
   ...(i.failure ? { failure: i.failure } : {}),
 });
 
-export function createHttpServer(gw: ProviderGateway): Server {
+export function createHttpServer(gw: ProviderGateway, opts: HttpOptions): Server {
+  if (opts.sessionSecret.length < 16) throw new Error('sessionSecret must be at least 16 bytes');
+  const limiter = opts.limiter ?? new RateLimiter(60, 20);
   return createServer(async (req, res) => {
     const requestId =
       typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length <= 64
@@ -117,6 +130,11 @@ export function createHttpServer(gw: ProviderGateway): Server {
         : randomUUID();
     res.setHeader('x-request-id', requestId);
     try {
+      const rl = limiter.take(req.socket.remoteAddress ?? 'unknown');
+      if (!rl.ok) {
+        res.setHeader('retry-after', String(rl.retryAfterSec));
+        throw new GatewayError('rate_limited', 'Too many requests');
+      }
       const url = new URL(req.url ?? '/', 'http://local');
       const path = url.pathname;
       const method = req.method ?? 'GET';
@@ -134,10 +152,13 @@ export function createHttpServer(gw: ProviderGateway): Server {
       }
       if (method === 'POST' && path === '/v1/sessions/offer') {
         parse(OfferBody, await readJson(req));
-        return send(res, 201, gw.createOffer());
+        const offer = gw.createOffer();
+        res.setHeader('x-sideband-session-token', sessionToken(opts.sessionSecret, offer.session));
+        return send(res, 201, offer);
       }
       if (method === 'POST' && path === '/v1/sessions/accept') {
         const b = parse(AcceptBody, await readJson(req));
+        requireSession(opts.sessionSecret, b.session, req.headers.authorization);
         const r = await gw.acceptSession({
           session: b.session,
           channelRef: b.channelRef,
@@ -149,6 +170,7 @@ export function createHttpServer(gw: ProviderGateway): Server {
       if ((m = /^\/v1\/sessions\/([^/]+)\/(meter|vouchers|serve|usage|close)$/.exec(path))) {
         const id = decodeURIComponent(m[1] as string);
         const action = m[2];
+        requireSession(opts.sessionSecret, id, req.headers.authorization);
         if (method === 'POST' && action === 'meter') {
           const b = parse(MeterBody, await readJson(req));
           return send(res, 200, gw.reportMeter(id, b));
@@ -181,6 +203,7 @@ export function createHttpServer(gw: ProviderGateway): Server {
       }
       if ((m = /^\/v1\/channels\/([^/]+)\/(settle|status)$/.exec(path))) {
         const id = decodeURIComponent(m[1] as string);
+        requireAdmin(opts.adminToken, req.headers['x-admin-token']);
         if (method === 'POST' && m[2] === 'settle') {
           // Returns a stateful intent, never a fake immediate success.
           return send(res, 202, intentJson(await gw.settle(id)));

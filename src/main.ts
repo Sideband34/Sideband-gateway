@@ -2,8 +2,15 @@
  * Dev entrypoint. Uses the in-memory TEST channel adapter: there is no chain
  * connection, no real funds. The provider key is ephemeral and synthetic.
  */
-import { Keypair } from '@stellar/stellar-sdk';
-import { InMemoryChannelAdapter, NETWORK_PASSPHRASES } from '@sideband/channels';
+import { randomBytes } from 'node:crypto';
+import { RateLimiter } from './http/ratelimit.js';
+import { Keypair, rpc } from '@stellar/stellar-sdk';
+import {
+  InMemoryChannelAdapter,
+  NETWORK_PASSPHRASES,
+  RpcSorobanClient,
+  SorobanChannelAdapter,
+} from '@sideband/channels';
 import { loadConfig } from './config.js';
 import { ProviderGateway } from './gateway.js';
 import { createHttpServer } from './http/server.js';
@@ -18,10 +25,32 @@ import { SettlementService } from './settlement/service.js';
 
 const config = loadConfig(process.env);
 const now = () => Math.floor(Date.now() / 1000);
-const kp = Keypair.random(); // ephemeral synthetic provider key
+// Provider key: ephemeral synthetic by default. With ADAPTER=soroban the
+// provider's Testnet secret comes from PROVIDER_SECRET (env/secret manager only).
+const useSoroban = process.env.ADAPTER === 'soroban';
+const kp = useSoroban ? Keypair.fromSecret(need('PROVIDER_SECRET')) : Keypair.random();
 const db = openDb(config.dbPath);
 const vouchers = new SqliteVoucherStore(db);
-const adapter = new InMemoryChannelAdapter(now);
+function need(k: string): string {
+  const v = process.env[k];
+  if (!v) throw new Error(`${k} is required`);
+  return v;
+}
+// UNVERIFIED against a live network: see README. Default is the labeled test adapter.
+const adapter = useSoroban
+  ? new SorobanChannelAdapter({
+      client: new RpcSorobanClient(
+        new rpc.Server(need('SOROBAN_RPC_URL')),
+        NETWORK_PASSPHRASES[config.network],
+        kp.publicKey(),
+      ),
+      networkPassphrase: NETWORK_PASSPHRASES[config.network],
+      wasmHash: Buffer.from(need('CHANNEL_WASM_HASH'), 'hex'),
+      signers: new Map([[kp.publicKey(), kp]]),
+      commitmentKeys: new Map(),
+      now,
+    })
+  : new InMemoryChannelAdapter(now);
 const gateway = new ProviderGateway({
   config,
   signer: { publicKey: kp.publicKey(), sign: (m) => kp.sign(Buffer.from(m)) },
@@ -35,7 +64,7 @@ const gateway = new ProviderGateway({
 console.log('restored sessions:', await gateway.restore());
 // Dev convenience: with DEV_PAYER_PUBLIC_KEY set, open ONE synthetic channel in
 // the in-memory TEST adapter so a local payer can try a session. No chain.
-if (process.env.DEV_PAYER_PUBLIC_KEY) {
+if (process.env.DEV_PAYER_PUBLIC_KEY && !useSoroban) {
   const { binding } = await adapter.open({
     networkPassphrase: NETWORK_PASSPHRASES[config.network],
     payer: process.env.DEV_PAYER_PUBLIC_KEY,
@@ -47,7 +76,17 @@ if (process.env.DEV_PAYER_PUBLIC_KEY) {
   });
   console.log(`synthetic dev channel (test adapter): ${binding.channelId}`);
 }
-const server = createHttpServer(gateway);
+const sessionSecret = process.env.SESSION_SECRET
+  ? Buffer.from(process.env.SESSION_SECRET, 'utf8')
+  : randomBytes(32); // ephemeral: session tokens stop working after restart
+if (!process.env.SESSION_SECRET) console.warn('SESSION_SECRET not set: using an ephemeral secret');
+if (!process.env.ADMIN_TOKEN)
+  console.warn('ADMIN_TOKEN not set: settle/status endpoints are disabled');
+const server = createHttpServer(gateway, {
+  sessionSecret,
+  ...(process.env.ADMIN_TOKEN ? { adminToken: process.env.ADMIN_TOKEN } : {}),
+  limiter: new RateLimiter(config.rateLimitBurst, config.rateLimitPerSec),
+});
 server.listen(config.port, config.host, () => {
   console.log(
     `sideband-gateway (TEST ADAPTER, ${config.network}) on ${config.host}:${config.port}`,

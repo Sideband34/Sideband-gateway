@@ -16,6 +16,8 @@ export interface GatewayConfig {
   manifestTtlSec: number;
   /** Unpaid value (stroops) the provider tolerates beyond the highest voucher. */
   creditAllowanceStroops: bigint;
+  rateLimitBurst: number;
+  rateLimitPerSec: number;
 }
 
 export class ConfigError extends Error {
@@ -67,5 +69,7 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
     offerTtlSec: int('OFFER_TTL_SEC', 300),
     manifestTtlSec: int('MANIFEST_TTL_SEC', 3600),
     creditAllowanceStroops: amt('CREDIT_ALLOWANCE', '0'),
+    rateLimitBurst: int('RATE_LIMIT_BURST', 60),
+    rateLimitPerSec: int('RATE_LIMIT_PER_SEC', 20),
   };
 }
