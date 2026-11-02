@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { acceptVoucher, parseAmount } from '@sideband/channels';
-import { SqliteNonceStore, SqliteVoucherStore, openDb } from '../src/replay/sqlite.js';
+import {
+  SqliteNonceStore,
+  SqliteSessionStore,
+  SqliteVoucherStore,
+  openDb,
+} from '../src/replay/sqlite.js';
+import { ProviderGateway } from '../src/gateway.js';
 import { S, activeSession, harness } from './helpers.js';
 
 const dirs: string[] = [];
@@ -90,6 +96,79 @@ describe('SQLite voucher + nonce stores', () => {
     const nonces2 = new SqliteNonceStore(db2);
     expect(nonces2.consume('nonce-from-before')).toBe(true);
     expect(nonces2.consume('nonce-from-before')).toBe(false);
+    db2.close();
+  });
+});
+
+describe('persistent session and meter state', () => {
+  it('restores an active session after restart with units, caps and channel lock intact', async () => {
+    const path = tmp();
+    const db1 = openDb(path);
+    const h1 = await harness({
+      vouchers: new SqliteVoucherStore(db1),
+      nonces: new SqliteNonceStore(db1),
+      sessions: new SqliteSessionStore(db1),
+    });
+    const id = await activeSession(h1, '0.5');
+    await h1.gw.submitVoucher(id, h1.voucher('0.003'));
+    await h1.gw.serve(id, 'a b c');
+    db1.close();
+
+    // "restart": new gateway process over the same DB and the same chain view
+    const db2 = openDb(path);
+    const gw2 = new ProviderGateway({
+      ...h1.deps,
+      vouchers: new SqliteVoucherStore(db2),
+      nonces: new SqliteNonceStore(db2),
+      sessions: new SqliteSessionStore(db2),
+    });
+    expect(await gw2.restore()).toEqual({ restored: 1, closed: 0 });
+    expect(await gw2.usage(id)).toMatchObject({
+      phase: 'active',
+      units: 3,
+      seq: 1,
+      owed: '0.003',
+      highestVoucher: '0.003',
+    });
+    // metering continues from the persisted counters and stays voucher-gated
+    await expect(gw2.serve(id, 'd')).rejects.toMatchObject({ code: 'payment_required' });
+    await gw2.submitVoucher(id, h1.voucher('0.004'));
+    expect((await gw2.serve(id, 'd')).cumulativeUnits).toBe(4);
+    // the channel lock survives: a second session cannot take the channel
+    const o = gw2.createOffer();
+    await expect(
+      gw2.acceptSession({
+        session: o.session,
+        channelRef: h1.channelId,
+        maxSpend: S,
+        nonce: 'fresh',
+      }),
+    ).rejects.toMatchObject({ code: 'channel_in_use' });
+    db2.close();
+  });
+
+  it('closes restored sessions whose channel is no longer open instead of resuming blindly', async () => {
+    const path = tmp();
+    const db1 = openDb(path);
+    const h1 = await harness({
+      vouchers: new SqliteVoucherStore(db1),
+      sessions: new SqliteSessionStore(db1),
+      channelExpiresAt: 2_000,
+    });
+    const id = await activeSession(h1);
+    db1.close();
+    h1.clock.t = 2_000; // channel expired while the provider was down
+    const db2 = openDb(path);
+    const gw2 = new ProviderGateway({
+      ...h1.deps,
+      vouchers: new SqliteVoucherStore(db2),
+      sessions: new SqliteSessionStore(db2),
+    });
+    expect(await gw2.restore()).toEqual({ restored: 1, closed: 1 });
+    expect(await gw2.usage(id)).toMatchObject({
+      phase: 'closed',
+      closeReason: 'restore_channel_unavailable',
+    });
     db2.close();
   });
 });

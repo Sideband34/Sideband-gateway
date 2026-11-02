@@ -8,7 +8,12 @@ import { loadConfig } from './config.js';
 import { ProviderGateway } from './gateway.js';
 import { createHttpServer } from './http/server.js';
 import { InMemoryNonceStore } from './replay/nonces.js';
-import { SqliteNonceStore, SqliteVoucherStore, openDb } from './replay/sqlite.js';
+import {
+  SqliteNonceStore,
+  SqliteSessionStore,
+  SqliteVoucherStore,
+  openDb,
+} from './replay/sqlite.js';
 import { SettlementService } from './settlement/service.js';
 
 const config = loadConfig(process.env);
@@ -25,7 +30,9 @@ const gateway = new ProviderGateway({
   nonces: config.dbPath === ':memory:' ? new InMemoryNonceStore() : new SqliteNonceStore(db),
   settlement: new SettlementService(adapter, vouchers),
   now,
+  sessions: new SqliteSessionStore(db),
 });
+console.log('restored sessions:', await gateway.restore());
 // Dev convenience: with DEV_PAYER_PUBLIC_KEY set, open ONE synthetic channel in
 // the in-memory TEST adapter so a local payer can try a session. No chain.
 if (process.env.DEV_PAYER_PUBLIC_KEY) {

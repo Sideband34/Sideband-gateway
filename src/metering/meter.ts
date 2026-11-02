@@ -32,6 +32,21 @@ export class UsageMeter {
     return this.pricePerUnit * BigInt(this._units);
   }
 
+  /** Restores persisted counters (startup only). Validates against the cap. */
+  restore(units: number, seq: number): void {
+    if (
+      !Number.isSafeInteger(units) ||
+      units < 0 ||
+      units > this.maxUnits ||
+      !Number.isSafeInteger(seq) ||
+      seq < 0
+    ) {
+      throw new MeterError('invalid_units', 'Invalid persisted meter state');
+    }
+    this._units = units;
+    this._seq = seq;
+  }
+
   /** Would recording [n] more units fit the cap? */
   canRecord(n: number): boolean {
     return Number.isSafeInteger(n) && n > 0 && this._units + n <= this.maxUnits;

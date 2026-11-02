@@ -29,9 +29,38 @@ export interface GatewayDeps {
   newId?: () => string;
   /** If set, only these payer commitment keys may open sessions. */
   allowedPayers?: ReadonlySet<string>;
+  /** Durable session/meter state. Defaults to memory (lost on restart). */
+  sessions?: SessionStore;
 }
 
 type Phase = 'offered' | 'active' | 'closed';
+
+/** Serializable session snapshot persisted after every mutation. */
+export interface SessionRecord {
+  id: string;
+  phase: Phase;
+  closeReason?: string;
+  offerExpiresAt: number;
+  channelRef?: string;
+  maxSpend?: string; // stroops
+  units: number;
+  seq: number;
+}
+
+export interface SessionStore {
+  save(rec: SessionRecord): void;
+  loadAll(): SessionRecord[];
+}
+
+export class InMemorySessionStore implements SessionStore {
+  private readonly m = new Map<string, SessionRecord>();
+  save(rec: SessionRecord) {
+    this.m.set(rec.id, { ...rec });
+  }
+  loadAll() {
+    return [...this.m.values()];
+  }
+}
 
 interface Session {
   id: string;
@@ -72,7 +101,60 @@ export class ProviderGateway {
   private readonly locks = new Map<string, Promise<unknown>>();
   private shuttingDown = false;
 
-  constructor(private readonly d: GatewayDeps) {}
+  private readonly store: SessionStore;
+
+  constructor(private readonly d: GatewayDeps) {
+    this.store = d.sessions ?? new InMemorySessionStore();
+  }
+
+  private persist(s: Session) {
+    this.store.save({
+      id: s.id,
+      phase: s.phase,
+      ...(s.closeReason ? { closeReason: s.closeReason } : {}),
+      offerExpiresAt: s.offerExpiresAt,
+      ...(s.channelRef ? { channelRef: s.channelRef } : {}),
+      ...(s.maxSpend !== undefined ? { maxSpend: s.maxSpend.toString() } : {}),
+      units: s.meter.units,
+      seq: s.meter.seq,
+    });
+  }
+
+  /**
+   * Reloads persisted sessions after a restart. Active sessions re-bind their
+   * channel from the adapter (the chain/cache is the source of truth); a
+   * session whose channel can no longer be bound is closed, never resumed blind.
+   */
+  async restore(): Promise<{ restored: number; closed: number }> {
+    let restored = 0;
+    let closed = 0;
+    const c = this.d.config;
+    for (const r of this.store.loadAll()) {
+      const meter = new UsageMeter(c.pricePerUnitStroops, c.maxSessionUnits);
+      meter.restore(r.units, r.seq);
+      const s: Session = {
+        id: r.id,
+        phase: r.phase,
+        offerExpiresAt: r.offerExpiresAt,
+        meter,
+        ...(r.closeReason ? { closeReason: r.closeReason } : {}),
+        ...(r.channelRef ? { channelRef: r.channelRef } : {}),
+        ...(r.maxSpend !== undefined ? { maxSpend: BigInt(r.maxSpend) } : {}),
+      };
+      this.sessions.set(s.id, s);
+      restored++;
+      if (s.phase !== 'active' || !s.channelRef) continue;
+      const b = await this.d.adapter.getBinding(s.channelRef);
+      if (b && b.status === 'open' && b.expiresAt > this.d.now()) {
+        s.binding = b;
+        this.activeChannels.set(b.channelId, s.id);
+      } else {
+        this.closeSession(s.id, 'restore_channel_unavailable');
+        closed++;
+      }
+    }
+    return { restored, closed };
+  }
 
   get isShuttingDown() {
     return this.shuttingDown;
@@ -126,6 +208,7 @@ export class ProviderGateway {
       offerExpiresAt: expiresAt,
       meter: new UsageMeter(c.pricePerUnitStroops, c.maxSessionUnits),
     });
+    this.persist(this.sessions.get(id) as Session);
     return {
       type: 'service_offer',
       v: 1,
@@ -181,6 +264,7 @@ export class ProviderGateway {
     s.maxSpend = a.maxSpend;
     s.binding = b;
     this.activeChannels.set(b.channelId, s.id);
+    this.persist(s);
     return { session: s.id, phase: s.phase };
   }
 
@@ -247,6 +331,7 @@ export class ProviderGateway {
         if (e instanceof MeterError) throw new GatewayError('unit_cap', e.message);
         throw e;
       }
+      this.persist(s);
       return {
         output: out.output,
         units: out.units,
@@ -296,6 +381,7 @@ export class ProviderGateway {
     if (s.channelRef && this.activeChannels.get(s.channelRef) === s.id) {
       this.activeChannels.delete(s.channelRef);
     }
+    this.persist(s);
   }
 
   async channelStatus(channelId: string) {

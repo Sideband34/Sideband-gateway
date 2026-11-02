@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { StoredVoucher, VoucherStore, Voucher } from '@sideband/channels';
+import type { SessionRecord, SessionStore } from '../gateway.js';
 import type { NonceStore } from './nonces.js';
 
 /** Opens (and migrates) the gateway's SQLite database. */
@@ -11,6 +12,10 @@ export function openDb(path: string): DatabaseSync {
       channel_id TEXT PRIMARY KEY,
       cumulative TEXT NOT NULL,      -- integer stroops as text (bigint-safe)
       voucher    TEXT NOT NULL       -- JSON
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      id   TEXT PRIMARY KEY,
+      json TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS nonces (
       nonce TEXT PRIMARY KEY
@@ -59,5 +64,22 @@ export class SqliteNonceStore implements NonceStore {
   consume(nonce: string): boolean {
     const r = this.db.prepare('INSERT OR IGNORE INTO nonces (nonce) VALUES (?)').run(nonce);
     return Number(r.changes) === 1;
+  }
+}
+
+/** Durable session/meter snapshots (JSON rows keyed by session id). */
+export class SqliteSessionStore implements SessionStore {
+  constructor(private readonly db: DatabaseSync) {}
+  save(rec: SessionRecord): void {
+    this.db
+      .prepare(
+        'INSERT INTO sessions (id, json) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json',
+      )
+      .run(rec.id, JSON.stringify(rec));
+  }
+  loadAll(): SessionRecord[] {
+    return (this.db.prepare('SELECT json FROM sessions').all() as { json: string }[]).map(
+      (r) => JSON.parse(r.json) as SessionRecord,
+    );
   }
 }
