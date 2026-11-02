@@ -1,0 +1,57 @@
+openapi: 3.1.0
+info:
+  title: Sideband provider gateway
+  version: 1.0.0
+  description: >
+    v1 of the provider gateway API (pre-release, Testnet/synthetic only).
+    Frames use sideband-protocol v1 field names. A voucher is a signed
+    commitment, never settled funds. Errors: {error:{code,message,requestId}}.
+paths:
+  /v1/health:
+    get: { summary: Liveness, responses: { '200': { description: ok or shutting_down } } }
+  /.well-known/sideband-service.json:
+    get: { summary: Provider-signed service manifest, responses: { '200': { description: SignedManifest } } }
+  /v1/sessions/offer:
+    post:
+      summary: Create a session; returns a service_offer frame
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/OfferRequest' } } } }
+      responses: { '201': { description: service_offer }, '503': { description: shutting_down } }
+  /v1/sessions/accept:
+    post:
+      summary: Bind a funded channel (session_accept frame)
+      responses:
+        '200': { description: active }
+        '409': { description: "no_funded_channel, wrong_network, wrong_provider, channel_not_open, channel_expired, channel_in_use, replayed_nonce, spend_exceeds_offer, spend_exceeds_deposit, offer_expired, bad_state" }
+        '403': { description: unauthorized_payer }
+  /v1/sessions/{id}/vouchers:
+    post:
+      summary: Submit a cumulative voucher frame
+      responses:
+        '200': { description: COMMITMENT_ACCEPTED_NOT_SETTLED }
+        '401': { description: bad_signature }
+        '409': { description: "replay, non_monotonic, over_budget, over_deposit, wrong_channel, wrong_network, commitment_mismatch, channel_expired, channel_settling" }
+  /v1/sessions/{id}/serve:
+    post:
+      summary: Demo metered call (word count)
+      responses: { '200': { description: output + metering }, '402': { description: payment_required with requiredCumulative } }
+  /v1/sessions/{id}/meter:
+    post: { summary: Compare payer and provider unit counts, responses: { '200': { description: sample + discrepancy } } }
+  /v1/sessions/{id}/usage:
+    get: { summary: Usage; settlement is always NOT_SETTLED here, responses: { '200': { description: usage } } }
+  /v1/sessions/{id}/close:
+    post: { summary: Close a session, responses: { '200': { description: usage } } }
+  /v1/channels/{id}/settle:
+    post:
+      summary: Prepare and submit settlement; returns a stateful intent
+      responses: { '202': { description: "intent state CREATED|AUTHORIZED|SUBMITTED|RECONCILING|FAILED|CONFIRMED" } }
+  /v1/channels/{id}/status:
+    get: { summary: Channel and settlement state, responses: { '200': { description: status } } }
+components:
+  schemas:
+    OfferRequest:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion]
+      properties:
+        schemaVersion: { const: 1 }
+        requestId: { type: string }
