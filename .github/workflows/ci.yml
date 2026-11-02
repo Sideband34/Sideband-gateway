@@ -1,0 +1,36 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: Sideband-gateway }
+      # @sideband/channels is consumed as a sibling checkout (file: dependency).
+      - uses: actions/checkout@v4
+        with:
+          repository: Sideband34/Sideband-channels
+          ref: claude/drips-wave-maintainer-projects-iwucl5
+          path: Sideband-channels
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci && npm run build
+        working-directory: Sideband-channels
+      - run: npm ci
+        working-directory: Sideband-gateway
+      - run: npm run check
+        working-directory: Sideband-gateway
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: Sideband-gateway
+  landing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+        working-directory: apps/landing
+      - run: npm run lint && npm test && npm run build
+        working-directory: apps/landing
