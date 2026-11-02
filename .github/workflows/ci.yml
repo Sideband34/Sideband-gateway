@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Sideband34/Sideband-channels
-          ref: claude/drips-wave-maintainer-projects-iwucl5
+          ref: main
           path: Sideband-channels
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
