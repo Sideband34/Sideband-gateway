@@ -251,6 +251,14 @@ export class ProviderGateway {
     if (holder && holder !== s.id && this.sessions.get(holder)?.phase === 'active') {
       throw new GatewayError('channel_in_use', 'Channel already has an active session');
     }
+    // Voucher amounts are cumulative per CHANNEL, so a channel serves one
+    // session: reusing it would let earlier commitments pay for new usage.
+    if (((await this.d.vouchers.get(b.channelId))?.cumulative ?? 0n) > 0n) {
+      throw new GatewayError(
+        'channel_used',
+        'Channel already carries commitments; open a new channel',
+      );
+    }
     const cap = s.meter.pricePerUnit * BigInt(s.meter.maxUnits);
     if (a.maxSpend > cap) throw new GatewayError('spend_exceeds_offer', 'maxSpend above offer cap');
     if (a.maxSpend > b.deposit) {

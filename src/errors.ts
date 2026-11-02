@@ -12,6 +12,7 @@ export type GatewayErrorCode =
   | 'channel_not_open'
   | 'channel_expired'
   | 'channel_in_use'
+  | 'channel_used'
   | 'channel_settling'
   | 'wrong_provider'
   | 'wrong_network'

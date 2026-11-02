@@ -212,6 +212,26 @@ describe('session setup', () => {
   });
 });
 
+describe('channel reuse', () => {
+  it('refuses a new session on a channel that already carries commitments (no free reuse)', async () => {
+    const h = await harness();
+    const id = await activeSession(h);
+    await h.gw.submitVoucher(id, h.voucher('0.01'));
+    h.gw.closeSession(id);
+    const o = h.gw.createOffer();
+    expect(
+      await code(
+        h.gw.acceptSession({
+          session: o.session,
+          channelRef: h.channelId,
+          maxSpend: S,
+          nonce: 'again',
+        }),
+      ),
+    ).toBe('channel_used');
+  });
+});
+
 describe('vouchers and metered service', () => {
   it('refuses service until a voucher covers it, then serves and meters', async () => {
     const h = await harness();
