@@ -265,7 +265,7 @@ describe('vouchers and metered service', () => {
       { ...h.domain, payer: strangerKp.publicKey() },
       parseAmount('0.1'),
     );
-    expect(await code(h.gw.submitVoucher(id, foreign))).toBe('commitment_mismatch');
+    expect(await code(h.gw.submitVoucher(id, foreign))).toBe('bad_signature');
     // attacker signs the genuine preimage with their own key
     const pre = buildPreimage(h.domain, parseAmount('0.1'));
     const good = h.voucher('0.1');

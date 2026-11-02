@@ -5,24 +5,12 @@ import {
   type ChannelAdapter,
   type FinalityEvidence,
   type SettlementIntent,
+  SubmissionTimeoutError,
   type VoucherStore,
 } from '@sideband/channels';
 import { GatewayError } from '../errors.js';
 
-/**
- * Thrown by chain adapters when a submission outcome is unknown (timeout,
- * connection loss). The tx hash MUST be known before submission so the intent
- * can be reconciled by hash rather than blindly retried.
- */
-export class SubmissionTimeoutError extends Error {
-  constructor(
-    readonly txHash: string,
-    message = 'Submission outcome unknown',
-  ) {
-    super(message);
-    this.name = 'SubmissionTimeoutError';
-  }
-}
+export { SubmissionTimeoutError };
 
 const LOCKED = new Set(['SUBMITTED', 'RECONCILING', 'CONFIRMED']);
 
