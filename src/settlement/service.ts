@@ -70,7 +70,17 @@ export class SettlementService {
     intent = this.save(transition(intent, 'AUTHORIZED'));
     try {
       const receipt = await this.adapter.close(channelId, intent.voucher);
-      return this.save(transition(intent, 'SUBMITTED', { txHash: receipt.txRef }));
+      const submitted = this.save(transition(intent, 'SUBMITTED', { txHash: receipt.txRef }));
+      // Only a real chain adapter reports the ledger the tx was applied in;
+      // synthetic test receipts can never reach CONFIRMED this way.
+      if (!receipt.synthetic && receipt.ledger !== undefined) {
+        return this.save(
+          transition(submitted, 'CONFIRMED', {
+            evidence: { network: intent.network, txHash: receipt.txRef, ledger: receipt.ledger },
+          }),
+        );
+      }
+      return submitted;
     } catch (e) {
       if (e instanceof SubmissionTimeoutError) {
         const sub = transition(intent, 'SUBMITTED', { txHash: e.txHash });
@@ -81,6 +91,28 @@ export class SettlementService {
       }
       throw e;
     }
+  }
+
+  /**
+   * Resolves a RECONCILING intent by looking the tx hash up on the chain.
+   * NOT_FOUND (or no lookup support) leaves it RECONCILING: unknown is not failed.
+   */
+  async reconcile(channelId: string): Promise<SettlementIntent> {
+    const i = this.get(channelId);
+    if (!i) throw new GatewayError('unknown_channel', 'No settlement intent');
+    if (i.state !== 'RECONCILING' || !i.txHash || !this.adapter.findTransaction) return i;
+    const found = await this.adapter.findTransaction(i.txHash);
+    if (found.status === 'SUCCESS' && found.ledger !== undefined) {
+      return this.save(
+        transition(i, 'CONFIRMED', {
+          evidence: { network: i.network, txHash: i.txHash, ledger: found.ledger },
+        }),
+      );
+    }
+    if (found.status === 'FAILED') {
+      return this.save(transition(i, 'FAILED', { failure: 'transaction failed on-chain' }));
+    }
+    return i;
   }
 
   /** Records finality evidence observed by a reconciler. */

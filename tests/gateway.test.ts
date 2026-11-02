@@ -481,3 +481,85 @@ describe('provider shutdown', () => {
     expect((await h.gw.settle(h.channelId)).state).toBe('SUBMITTED');
   });
 });
+
+describe('Soroban-backed settlement path (fake chain client)', () => {
+  it('real-adapter receipts confirm with ledger evidence; timeouts reconcile by hash', async () => {
+    const {
+      SorobanChannelAdapter,
+      SubmissionTimeoutError: Timeout,
+      NETWORK_PASSPHRASES: N,
+    } = await import('@sideband/channels');
+    const { Address, nativeToScVal, xdr, StrKey } = await import('@stellar/stellar-sdk');
+    const channel = StrKey.encodeContract(Buffer.alloc(32, 9));
+    const sym = (s: string) => nativeToScVal(s, { type: 'symbol' });
+    const scv = (status: string, paid = 0n, ref = 0n) =>
+      xdr.ScVal.scvMap(
+        (
+          [
+            ['deposit', nativeToScVal(10n * S, { type: 'i128' })],
+            ['expires_at', nativeToScVal(100_000n, { type: 'u64' })],
+            ['paid_to_provider', nativeToScVal(paid, { type: 'i128' })],
+            ['payer', new Address(payerKp.publicKey()).toScVal()],
+            ['payer_key', xdr.ScVal.scvBytes(payerKp.rawPublicKey())],
+            ['provider', new Address(providerKp.publicKey()).toScVal()],
+            ['refunded_to_payer', nativeToScVal(ref, { type: 'i128' })],
+            ['status', xdr.ScVal.scvVec([sym(status)])],
+            ['token', new Address(StrKey.encodeContract(Buffer.alloc(32, 5))).toScVal()],
+          ] as [string, ReturnType<typeof sym>][]
+        ).map(([k, v]) => new xdr.ScMapEntry({ key: sym(k), val: v })),
+      );
+    let state = scv('Open');
+    let mode: 'ok' | 'timeout' = 'ok';
+    const txs = new Map<string, { status: 'SUCCESS' | 'FAILED' | 'NOT_FOUND'; ledger?: number }>();
+    const client = {
+      readChannel: async () => state,
+      deploy: async () => channel,
+      getTransaction: async (h: string) => txs.get(h) ?? { status: 'NOT_FOUND' as const },
+      invoke: async () => {
+        if (mode === 'timeout') throw new Timeout('hash-t');
+        state = scv('Closed', parseAmount('0.004'), 10n * S - parseAmount('0.004'));
+        return { hash: 'hash-ok', status: 'SUCCESS' as const, ledger: 77 };
+      },
+    };
+    const adapter = new SorobanChannelAdapter({
+      client,
+      networkPassphrase: N.testnet,
+      wasmHash: Buffer.alloc(32),
+      signers: new Map([[providerKp.publicKey(), providerKp]]),
+      commitmentKeys: new Map(),
+      now: () => 1000,
+    });
+    const vouchers = new (await import('@sideband/channels')).InMemoryVoucherStore();
+    const { SettlementService } = await import('../src/settlement/service.js');
+    const svc = new SettlementService(adapter, vouchers);
+    const domain = {
+      networkPassphrase: N.testnet,
+      channelId: channel,
+      payer: payerKp.publicKey(),
+      provider: providerKp.publicKey(),
+    };
+    const v = createVoucher(keypairSigner(payerKp), domain, parseAmount('0.004'));
+    await vouchers.compareAndSet(channel, 0n, { cumulative: parseAmount('0.004'), voucher: v });
+
+    const done = await svc.submit(channel);
+    expect(done).toMatchObject({ state: 'CONFIRMED', txHash: 'hash-ok' });
+    expect(done.evidence).toMatchObject({ ledger: 77, network: N.testnet });
+
+    // timeout path on a fresh channel state
+    state = scv('Open');
+    mode = 'timeout';
+    const svc2 = new SettlementService(adapter, vouchers);
+    const rec = await svc2.submit(channel);
+    expect(rec).toMatchObject({ state: 'RECONCILING', txHash: 'hash-t' });
+    expect((await svc2.reconcile(channel)).state).toBe('RECONCILING'); // NOT_FOUND != failed
+    txs.set('hash-t', { status: 'SUCCESS', ledger: 91 });
+    const fin = await svc2.reconcile(channel);
+    expect(fin).toMatchObject({ state: 'CONFIRMED' });
+    expect(fin.evidence?.ledger).toBe(91);
+
+    const svc3 = new SettlementService(adapter, vouchers);
+    await svc3.submit(channel);
+    txs.set('hash-t', { status: 'FAILED', ledger: 92 });
+    expect((await svc3.reconcile(channel)).state).toBe('FAILED');
+  });
+});
