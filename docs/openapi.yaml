@@ -46,7 +46,18 @@ paths:
       responses: { '202': { description: "intent state CREATED|AUTHORIZED|SUBMITTED|RECONCILING|FAILED|CONFIRMED" } }
   /v1/channels/{id}/status:
     get: { summary: Channel and settlement state, responses: { '200': { description: status } } }
+security:
+  - sessionToken: []
 components:
+  securitySchemes:
+    sessionToken:
+      type: http
+      scheme: bearer
+      description: Returned in the x-sideband-session-token header of POST /v1/sessions/offer. Not required for health, manifest and offer. Channel settle/status use the x-admin-token header instead.
+    adminToken:
+      type: apiKey
+      in: header
+      name: x-admin-token
   schemas:
     OfferRequest:
       type: object

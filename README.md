@@ -55,14 +55,19 @@ The project uses the **approved flat SVG logo** in [`brand/icon.svg`](./brand/ic
 - `fixtures/session-transcript.json`: deterministic synthetic transcript (signed manifest + protocol v1 frames) for sibling consumer tests.
 - `apps/landing`: Next.js 16 static site (overview, providers, devices, safety/FAQ) with accessible-route tests. It claims no store listing, no device support and no settlement finality.
 
-**Verified:** `npm run check` (prettier, eslint, tsc, 47 vitest tests) and in `apps/landing`: `npm run lint && npm run typecheck && npm test && npm run build`.
+**Verified:** `npm run check` (prettier, eslint, tsc, 54 vitest tests) and in `apps/landing`: `npm run lint && npm run typecheck && npm test && npm run build`.
+
+**M2 additions**
+
+- Durable session and meter state (`SqliteSessionStore`, `gateway.restore()`): restart resumes metering from persisted counters; sessions whose channel is gone/expired are closed, not resumed.
+- API auth: session endpoints need the HMAC bearer token returned in the `x-sideband-session-token` header of the offer response (bound to that session); `settle` and channel `status` need `x-admin-token` (disabled when `ADMIN_TOKEN` is unset). Per-client token-bucket rate limiting with 429 + `Retry-After`.
+- Settlement with a real adapter: receipts with a ledger confirm with finality evidence; submission timeouts become `RECONCILING` and resolve by tx-hash lookup (`reconcile`). Tested through `SorobanChannelAdapter` with a fake chain client. `ADAPTER=soroban` wiring exists in `src/main.ts`.
 
 **NOT done / unverified**
 
-- All channel interaction uses `InMemoryChannelAdapter` (labeled test adapter, `synthetic: true`). There is no Soroban RPC adapter, no Testnet transaction and no reconciliation against a real ledger.
-- Sessions are held in memory (vouchers and nonces are durable; session/meter state is not). No auth/RBAC on the HTTP API, no rate limiting, no TLS: local-demo only.
-- Voucher and manifest layouts are Sideband test formats, not audited.
-- The sibling `Dart` protocol decoding of the fixture frames is exercised in `sideband-mobile`, not here.
+- No live Soroban/Testnet run: the Soroban path is only exercised against fake clients. Default runtime uses `InMemoryChannelAdapter` (`synthetic: true`, can never reach `CONFIRMED`).
+- Rate limiting is in-process (single instance); no TLS termination, no RBAC beyond the two token kinds, no key rotation, no metrics/alerting.
+- Voucher bytes follow the upstream one-way-channel commitment layout via `@sideband/channels` but have not been checked against a deployed upstream contract.
 
 ## Quick start
 
