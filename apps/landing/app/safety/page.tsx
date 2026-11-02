@@ -31,18 +31,25 @@ const faq = [
 
 export default function Safety() {
   return (
-    <>
-      <h1>Safety and FAQ</h1>
-      <dl>
+    <div className="wrap page faq-wrap">
+      <div className="page-head">
+        <p className="kicker">Safety</p>
+        <h1>Safety and FAQ</h1>
+        <p className="lede">
+          What Sideband guarantees, what it does not, and where the risk sits while a session is
+          offline.
+        </p>
+      </div>
+      <dl className="faq-list">
         {faq.map(([q, a]) => (
-          <div key={q} className="card" style={{ marginBottom: 16 }}>
+          <div key={q} className="card">
             <dt>
-              <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{q}</h2>
+              <h2>{q}</h2>
             </dt>
-            <dd style={{ margin: '8px 0 0' }}>{a}</dd>
+            <dd>{a}</dd>
           </div>
         ))}
       </dl>
-    </>
+    </div>
   );
 }
