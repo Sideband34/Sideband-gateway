@@ -356,9 +356,13 @@ export class ProviderGateway {
       const newOwed = s.meter.owed + s.meter.pricePerUnit * BigInt(units);
       const covered = await this.sessionCommitted(s);
       if (newOwed > covered + this.d.config.creditAllowanceStroops) {
+        // Wire amounts are CHANNEL cumulative (what the payer signs): the
+        // session baseline plus this session's owed / committed value.
+        const base = s.baseline ?? 0n;
         throw new GatewayError('payment_required', 'Voucher does not cover this request', {
-          requiredCumulative: formatAmount(newOwed),
-          currentCumulative: formatAmount(covered),
+          requiredCumulative: formatAmount(base + newOwed),
+          currentCumulative: formatAmount(base + covered),
+          sessionOwed: formatAmount(newOwed),
         });
       }
       const out = runDemo(text);

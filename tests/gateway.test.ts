@@ -258,8 +258,13 @@ describe('channel reuse (protocol v2 baseline)', () => {
     const o = h.gw.createOffer();
     await accept(h, o.session, '0.01', parseAmount('0.005'));
     const id = o.session;
-    // Old commitments do not pay for new usage.
-    expect(await code(h.gw.serve(id, 'a b c'))).toBe('payment_required');
+    // Old commitments do not pay for new usage; the 402 names the channel
+    // cumulative to sign (baseline + session owed).
+    const e402 = await h.gw.serve(id, 'a b c').catch((x: GatewayError) => x);
+    expect(e402).toMatchObject({
+      code: 'payment_required',
+      extra: { requiredCumulative: '0.013', currentCumulative: '0.01', sessionOwed: '0.003' },
+    });
     await h.gw.submitVoucher(id, h.voucher('0.013'));
     expect(await h.gw.serve(id, 'a b c')).toMatchObject({ units: 3, owed: '0.003' });
     expect(await h.gw.usage(id)).toMatchObject({
