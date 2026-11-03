@@ -1,6 +1,10 @@
 import Link from 'next/link';
 import { Download } from '@/components/Download';
 import { HeroDemo } from '@/components/HeroDemo';
+import { Lifecycle } from '@/components/Lifecycle';
+import { Storyboard } from '@/components/Storyboard';
+import { UseCases } from '@/components/UseCases';
+import { VoucherExplainer } from '@/components/VoucherExplainer';
 import {
   IconAlert,
   IconArrowRight,
@@ -51,7 +55,7 @@ const steps = [
     net: 'Online',
     icon: IconLedger,
     title: 'Settle later',
-    body: 'When connectivity returns, the provider submits its highest voucher on-chain and the rest of the deposit is refundable to the payer.',
+    body: 'When connectivity returns, the provider submits its highest voucher on-chain: it withdraws and keeps the channel open, or closes it and refunds the rest to the payer.',
   },
 ];
 
@@ -125,8 +129,8 @@ const safety = [
   },
   {
     icon: IconClock,
-    title: 'Refund after expiry',
-    body: 'If a provider disappears, the payer can reclaim the deposit on-chain once the channel expires.',
+    title: 'Close with a dispute window',
+    body: 'If a provider disappears, the payer starts a close on-chain. After a dispute window (never before the channel expiry) the rest is refunded.',
   },
   {
     icon: IconFlask,
@@ -151,7 +155,7 @@ const faq = [
   },
   {
     q: 'What happens if my phone dies mid-session?',
-    a: 'Nothing is charged beyond the highest voucher you already signed. Resuming a session after a crash is not implemented yet; the channel can still be settled or refunded.',
+    a: 'Nothing is charged beyond the highest voucher you already signed. The app journals the session and, when reopened, re-attaches to it and re-sends a voucher that was signed but not delivered. If the provider no longer has the session, the receipt is marked interrupted.',
   },
   {
     q: 'Which devices are supported?',
@@ -252,6 +256,37 @@ export default function Home() {
               </Reveal>
             ))}
           </ol>
+        </div>
+      </section>
+
+      <section id="story" className="section section-alt" aria-labelledby="story-h">
+        <div className="wrap">
+          <Reveal className="section-head">
+            <p className="kicker">One session, three phases</p>
+            <h2 id="story-h">Watch a session from deposit to settlement.</h2>
+            <p className="section-lede">
+              Pick a phase or let it play. The middle phase is the one that works without internet.
+            </p>
+          </Reveal>
+          <Reveal>
+            <Storyboard />
+          </Reveal>
+        </div>
+      </section>
+
+      <section id="vouchers" className="section" aria-labelledby="vouchers-h">
+        <div className="wrap">
+          <Reveal className="section-head">
+            <p className="kicker">Spend caps and vouchers</p>
+            <h2 id="vouchers-h">Move the sliders: the phone never signs past your cap.</h2>
+            <p className="section-lede">
+              A voucher is the total committed so far on the channel, not a per-unit payment. A
+              later session starts from where the last one ended.
+            </p>
+          </Reveal>
+          <Reveal>
+            <VoucherExplainer />
+          </Reveal>
         </div>
       </section>
 
@@ -371,6 +406,37 @@ export default function Home() {
                 </tbody>
               </table>
             </div>
+          </Reveal>
+        </div>
+      </section>
+
+      <section id="use-cases" className="section section-alt" aria-labelledby="usecases-h">
+        <div className="wrap">
+          <Reveal className="section-head">
+            <p className="kicker">Where it could fit</p>
+            <h2 id="usecases-h">Small services, paid by the unit, right where you are.</h2>
+            <p className="section-lede">
+              Example scenarios the protocol is designed for. None of them is a live deployment.
+            </p>
+          </Reveal>
+          <Reveal>
+            <UseCases />
+          </Reveal>
+        </div>
+      </section>
+
+      <section id="under-the-hood" className="section" aria-labelledby="hood-h">
+        <div className="wrap">
+          <Reveal className="section-head">
+            <p className="kicker">Under the hood</p>
+            <h2 id="hood-h">The channel contract, one call at a time.</h2>
+            <p className="section-lede">
+              Step through the Soroban reference contract: open, top up, settle, close or refund.
+              The totals always add up to the deposit.
+            </p>
+          </Reveal>
+          <Reveal>
+            <Lifecycle />
           </Reveal>
         </div>
       </section>
