@@ -1,91 +1,193 @@
-<img src="./brand/icon.svg" alt="Sideband logo" width="144" />
+<div align="center">
 
-# sideband-gateway
+<img src="./brand/icon.svg" alt="Sideband logo" width="112" />
 
-> Sideband — Nearby services. Metered value. Stellar settlement.
+# Sideband Gateway
 
-**Status: M0-M2 core implemented against a TEST channel adapter (see Status below); no Testnet integration.** This repo is one of **exactly four meaningful independent codebases** in the Sideband Stellar-native project. It is not a placeholder created merely to increase Drips Wave submissions.
+**The provider runtime for Sideband, and the product website.**
 
-## Owns
-Local service hosting, provider authentication, usage meter, anti-replay voucher validation, metered-demo service, settlement preparation, product marketing web
+Part of [Sideband](#how-sideband-works): nearby services, metered value, Stellar settlement.
 
-## Why it is separate
-It has a distinct runtime/toolchain, external interface, tests, release cadence and maintainership boundary. Its siblings depend on its delivered interface, but implementation responsibilities must not be duplicated.
+[![CI](https://github.com/Sideband34/Sideband-gateway/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sideband34/Sideband-gateway/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-FF8B24.svg)](./LICENSE)
+[![Status: pre-release](https://img.shields.io/badge/status-pre--release-130B12.svg)](#status)
+[![Network: Stellar Testnet only](https://img.shields.io/badge/network-Stellar%20Testnet%20only-130B12.svg)](./SECURITY.md)
 
-## Sibling repositories
-- `sideband-mobile` — Nearby service discovery UX, local sessions, payer/provider modes, secure signing, spending limits, usage history and receipts
-- `sideband-protocol` — BLE/local-Wi-Fi discovery, pairing, authenticated session frames, transport retries, metering message schema, backpressure and session IDs
-- `sideband-channels` — Stellar channel deployment/adapters, prefunding, domain-separated cumulative commitments, close/refund, on-chain settlement and contract tests
+[How it works](#how-sideband-works) · [Quickstart](#quickstart) · [Status](#status) · [Architecture](#architecture) · [Contributing](#contributing) · [Security](#security)
 
-## Architecture and development context
-Start with:
-- `AGENTS.md` — coding agent rules;
-- `docs/PRD.md` — product purpose and MVP;
-- `docs/SRD.md` — user/system requirements, APIs and state;
-- `docs/ARCHITECTURE.md` — four-repository responsibilities, data and execution paths;
-- `docs/TECHNICAL_BUILD.md` — recommended bootstrap, testing, phases;
-- `docs/SECURITY.md` — security/trust boundaries;
-- `docs/BRAND.md` — approved flat logo and flexible UI direction;
-- `docs/ROADMAP.md` — milestone acceptance gates.
+</div>
 
-## Technical target
-TypeScript gateway + small landing site. The actual product implementation starts at milestone M0; no real-money transactions or claims exist in this scaffold.
+> [!WARNING]
+> Pre-release software for **Stellar Testnet and synthetic assets only**. The channel contract and
+> voucher format are **unaudited**. Do not use with real funds.
 
-## Minimal integration contract
-Always test the dependency path stated in ARCHITECTURE.md. Every new public endpoint/ABI/package message must be versioned and covered by consumer fixtures. See `docs/SRD.md` and `docs/TECHNICAL_BUILD.md`.
+## What this repository is
 
-## Drips Wave
-Stellar is essential: An online setup transaction deposits a supported Stellar asset into a Soroban one-way payment channel bound to a provider and payer commitment key. Approval/eligibility for Wave depends on substantive open-source implementation and organizer review, not repo count.
+The software a **provider** runs to sell a metered service to nearby phones, plus the Sideband
+landing site in [`apps/landing`](./apps/landing).
 
+- **Session API** (`src/gateway.ts`, `src/http`): versioned v1 HTTP API
+  ([OpenAPI](./docs/openapi.yaml)): session offer/accept with funded-channel binding, network and
+  provider checks, one-time nonces, one session per channel and spend caps. Zod-validated input,
+  16 KiB body limit, documented error schema and request ids.
+- **Voucher acceptance** via `@sideband/channels` (ed25519, domain separation, atomic
+  compare-and-swap) with durable SQLite voucher, nonce and session stores that survive restart.
+- **Metered demo service**: per-word text processing that refuses unpaid work with HTTP 402, and
+  a usage meter that reports payer/provider discrepancies.
+- **Settlement preparation**: intents move `CREATED → AUTHORIZED → SUBMITTED`, `RECONCILING`
+  after a timeout, `CONFIRMED` only with finality evidence for the right network.
+- **Auth and limits**: per-session HMAC bearer tokens, an admin token for settle/status, and
+  token-bucket rate limiting with `429` + `Retry-After`.
+- **Provider manifest**: provider-signed service manifest and a payer-side verifier.
 
-## Official project identity
+## Screenshots
 
-The project uses the **approved flat SVG logo** in [`brand/icon.svg`](./brand/icon.svg), with an editable transparent vector mark in [`brand/mark.svg`](./brand/mark.svg). The [512 px GitHub organization avatar](./brand/org-avatar.png) is in the same directory. This logo is shared by all four project repositories. UI design remains intentionally flexible.
+The landing site (`apps/landing`), built and captured with Playwright at 1440 px and 390 px:
 
-
-## Status: provider gateway + landing (v0.1.0)
-
-**Implemented and tested**
-
-- `src/gateway.ts`: session offer/accept (funded-channel binding, network and provider checks, one-time nonces, per-session channel lock, spend caps), voucher acceptance via `@sideband/channels` (`acceptVoucher`: ed25519, domain separation, atomic compare-and-swap), metered demo service (per-word text upper-casing) that refuses unpaid work with HTTP 402, usage meter with payer/provider discrepancy report, graceful provider shutdown that prepares settlement for all accepted value.
-- `src/replay/sqlite.ts`: durable voucher and nonce stores on `node:sqlite` (CAS is one guarded SQL statement). Survives restart in tests.
-- `src/settlement`: prepares/submits settlement intents (`CREATED -> AUTHORIZED -> SUBMITTED`, `RECONCILING` after a submission timeout, `CONFIRMED` only with finality evidence for the right network). Amount locks once settlement is in flight.
-- `src/auth/manifest.ts`: provider-signed service manifest and a payer-side verifier (stale, not-yet-valid, wrong network, untrusted provider, tamper). Test format.
-- `src/http/server.ts`: API v1 per `docs/SRD.md` (`docs/openapi.yaml`), Zod-validated, 16 KiB body bound, documented error schema, request ids.
-- `fixtures/session-transcript.json`: deterministic synthetic transcript (signed manifest + protocol v1 frames) for sibling consumer tests.
-- `apps/landing`: Next.js 16 static site (overview, providers, devices, safety/FAQ) with accessible-route tests. It claims no store listing, no device support and no settlement finality.
-
-**Verified:** `npm run check` (prettier, eslint, tsc, 54 vitest tests) and in `apps/landing`: `npm run lint && npm run typecheck && npm test && npm run build`.
-
-**M2 additions**
-
-- Durable session and meter state (`SqliteSessionStore`, `gateway.restore()`): restart resumes metering from persisted counters; sessions whose channel is gone/expired are closed, not resumed.
-- API auth: session endpoints need the HMAC bearer token returned in the `x-sideband-session-token` header of the offer response (bound to that session); `settle` and channel `status` need `x-admin-token` (disabled when `ADMIN_TOKEN` is unset). Per-client token-bucket rate limiting with 429 + `Retry-After`.
-- Settlement with a real adapter: receipts with a ledger confirm with finality evidence; submission timeouts become `RECONCILING` and resolve by tx-hash lookup (`reconcile`). Tested through `SorobanChannelAdapter` with a fake chain client. `ADAPTER=soroban` wiring exists in `src/main.ts`.
-
-**NOT done / unverified**
-
-- No live Soroban/Testnet run: the Soroban path is only exercised against fake clients. Default runtime uses `InMemoryChannelAdapter` (`synthetic: true`, can never reach `CONFIRMED`).
-- Rate limiting is in-process (single instance); no TLS termination, no RBAC beyond the two token kinds, no key rotation, no metrics/alerting.
-- Voucher bytes follow the upstream one-way-channel commitment layout via `@sideband/channels` but have not been checked against a deployed upstream contract.
-
-## Quick start
-
-Needs the sibling repo built first (it is a `file:` dependency):
-
-```
-git clone <sideband-channels> ../Sideband-channels && (cd ../Sideband-channels && npm ci && npm run build)
-npm ci
-npm run check
-npm run fixtures                      # regenerate fixtures/session-transcript.json
-DEV_PAYER_PUBLIC_KEY=G... npm start   # local server; Ctrl-C prepares settlement and exits cleanly
-cd apps/landing && npm ci && npm run build
-```
-
-## Siblings and compatibility
-
-| Repo | Used for |
+| Light | Dark |
 |---|---|
-| `sideband-channels` v0.1.0 | voucher verification, CAS interface, channel adapter interface, settlement intents |
-| `sideband-protocol` v0.1.0 | frame field names and limits (`service_offer`, `session_accept`, `voucher`, `meter_sample`) |
-| `sideband-mobile` | payer client; decodes `fixtures/session-transcript.json` |
+| <img src="./docs/screenshots/landing-desktop-light.png" alt="Sideband landing page, light theme, desktop" /> | <img src="./docs/screenshots/landing-desktop-dark.png" alt="Sideband landing page, dark theme, desktop" /> |
+| <img src="./docs/screenshots/landing-mobile-light.png" alt="Sideband landing page, light theme, mobile" width="300" /> | <img src="./docs/screenshots/landing-mobile-dark.png" alt="Sideband landing page, dark theme, mobile" width="300" /> |
+
+Full-page captures: [light](./docs/screenshots/landing-desktop-light-full.png) ·
+[dark](./docs/screenshots/landing-desktop-dark-full.png) ·
+[hero animation, mobile](./docs/screenshots/landing-mobile-light-demo.png).
+
+## Quickstart
+
+Requires Node 22.13+. The channels SDK is a `file:` dependency on a sibling checkout.
+
+```bash
+git clone https://github.com/Sideband34/Sideband-channels
+git clone https://github.com/Sideband34/Sideband-gateway
+(cd Sideband-channels && npm ci && npm run build)
+cd Sideband-gateway
+npm ci
+npm run check                         # prettier, eslint, tsc, 55 vitest tests
+
+# Run a provider with ONE synthetic channel in the in-memory test adapter (loopback only)
+DEV_PAYER_PUBLIC_KEY=GBIRYNFBULFVEHPRNOZENOG6RZ4ZPTRDLR7HNMRKHV2QHISIDHOYV6ZN npm start
+curl localhost:3001/v1/health         # {"status":"ok","schemaVersion":1,...}
+```
+
+`Ctrl-C` prepares settlement for all accepted value and exits cleanly. `npm run fixtures`
+regenerates [`fixtures/session-transcript.json`](./fixtures/session-transcript.json), the
+synthetic transcript sibling repos test against. Configuration is in
+[`.env.example`](./.env.example).
+
+Landing site:
+
+```bash
+cd apps/landing
+npm ci
+npm run lint && npm run typecheck && npm test && npm run build   # static export in out/
+```
+
+The site never shows store links unless real listings are configured; see
+[`apps/landing/README.md`](./apps/landing/README.md).
+
+## Status
+
+| Area | Status |
+|---|---|
+| v1 API, auth, rate limiting, durable stores | Implemented, tested |
+| Voucher validation and anti-replay | Implemented, tested |
+| Metered demo service, usage meter | Implemented, tested |
+| Settlement intents and reconciliation | Implemented, tested with a fake Soroban client |
+| `ADAPTER=soroban` against Testnet | **Not run**: default runtime is the in-memory test adapter (`synthetic: true`, never `CONFIRMED`) |
+| Multi-instance rate limiting, TLS, key rotation, metrics | Not implemented |
+| Landing site | Implemented: static export, 27 tests (accessibility, honesty, store-badge gating) |
+| Hosted deployment of the site | None yet |
+
+### Compatibility
+
+| Repository | Used for |
+|---|---|
+| [Sideband-channels](https://github.com/Sideband34/Sideband-channels) v0.1.0 | voucher verification, CAS interface, channel adapters, settlement intents |
+| [Sideband-protocol](https://github.com/Sideband34/Sideband-protocol) v0.1.0 | frame field names and limits (`service_offer`, `session_accept`, `voucher`, `meter_sample`) |
+| [Sideband-mobile](https://github.com/Sideband34/Sideband-mobile) | payer client; decodes the session transcript fixture and runs an e2e test against this gateway |
+
+## How Sideband works
+
+Sideband lets a phone pay a nearby device for a small metered service (for example, text
+processing priced per word) over Bluetooth LE or local Wi-Fi, without needing the internet during
+the session:
+
+1. **Fund a channel (online).** The payer deposits a Testnet asset into a Soroban payment channel
+   bound to one provider.
+2. **Discover nearby.** Devices find each other locally, verify the provider's signed service
+   manifest, and agree on price, units and a spending cap.
+3. **Stream with signed vouchers (offline).** Each metered unit is paid with a cumulative,
+   domain-separated voucher signed on the phone. The provider verifies it locally and rejects
+   replays and rollbacks.
+4. **Settle later (online).** The provider submits its highest voucher on-chain; the rest of the
+   deposit is refundable to the payer after expiry.
+
+A voucher is a commitment against already-locked funds, **not** a completed payment. Nothing is
+shown as settled until Stellar confirms it.
+
+## Architecture
+
+Four repositories, one responsibility each. No payment signing lives in transport code, and no
+chain logic lives in the app. This repository is highlighted.
+
+```mermaid
+flowchart LR
+  subgraph phone["Payer phone"]
+    M["Sideband-mobile<br/>Flutter app"]
+  end
+  subgraph provider["Provider device"]
+    G["Sideband-gateway<br/>TypeScript runtime"]
+  end
+  P["Sideband-protocol<br/>Dart frames + state machine"]
+  C["Sideband-channels<br/>Soroban contract + TS SDK"]
+  S[("Stellar Testnet")]
+  M -->|"frames, session rules"| P
+  G -->|"frame schema + limits"| P
+  M <-.->|"BLE / local Wi-Fi:<br/>offer, meter, vouchers"| G
+  M -->|"voucher format<br/>(Dart port, golden vectors)"| C
+  G -->|"verify vouchers,<br/>prepare settlement"| C
+  C -->|"fund / close / refund"| S
+  classDef current fill:#FF8B24,color:#130B12,stroke:#130B12,stroke-width:2px
+  class G current
+```
+
+| Repository | Stack | Responsibility |
+|---|---|---|
+| [Sideband-mobile](https://github.com/Sideband34/Sideband-mobile) | Flutter | Payer app: discovery UX, spend limits, voucher signing, history and receipts |
+| [Sideband-protocol](https://github.com/Sideband34/Sideband-protocol) | Dart | Versioned session frames, canonical encoding, session state machine, metering, transport contract |
+| [**Sideband-gateway**](https://github.com/Sideband34/Sideband-gateway) | TypeScript | Provider runtime: signed manifest, metered service, anti-replay voucher validation, settlement prep, landing site |
+| [Sideband-channels](https://github.com/Sideband34/Sideband-channels) | Rust · TypeScript | Soroban payment channel contract, cumulative voucher format, channel adapters, settlement intents |
+
+Cross-repo contracts are pinned with fixtures: voucher golden vectors from `Sideband-channels`,
+and a synthetic session transcript from `Sideband-gateway`. See
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for data and ownership paths.
+
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md) for the local checks and
+workflow, and pick from the scoped work in
+[docs/CONTRIBUTOR_ISSUES.md](./docs/CONTRIBUTOR_ISSUES.md): each item lists its interfaces,
+acceptance tests and size. Please follow the [Code of Conduct](./CODE_OF_CONDUCT.md).
+
+**Drips Wave.** Sideband intends to participate in
+[Drips Wave](https://docs.drips.network/wave/maintainers/participating-in-a-wave/) on Stellar.
+Participation and rewards depend on organizer approval and are not guaranteed. Wave issues are
+real, scoped work in this repository's boundary, never filler.
+
+## Security
+
+Please report vulnerabilities privately; see [SECURITY.md](./SECURITY.md). The threat model is
+in [docs/SECURITY.md](./docs/SECURITY.md). Never post keys or seeds in issues, even Testnet ones.
+
+## Project documents
+
+[PRD](./docs/PRD.md) · [Requirements](./docs/SRD.md) · [Architecture](./docs/ARCHITECTURE.md) ·
+[Stellar protocol](./docs/STELLAR_PROTOCOL.md) · [Roadmap](./docs/ROADMAP.md) ·
+[Brand](./docs/BRAND.md) · [Agent rules](./AGENTS.md)
+
+The approved logo is in [`brand/`](./brand) and shared by all four repositories.
+
+## License
+
+[MIT](./LICENSE)
