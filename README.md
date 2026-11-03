@@ -42,7 +42,8 @@ landing site in [`apps/landing`](./apps/landing).
 
 ## Screenshots
 
-The landing site (`apps/landing`), built and captured with Playwright at 1440 px and 390 px:
+The landing site (`apps/landing`), production build served statically and captured with
+Playwright at 1440 px and 360 px (reduced motion, so animations are shown at rest):
 
 | Light | Dark |
 |---|---|
@@ -50,8 +51,18 @@ The landing site (`apps/landing`), built and captured with Playwright at 1440 px
 | <img src="./docs/screenshots/landing-mobile-light.png" alt="Sideband landing page, light theme, mobile" width="300" /> | <img src="./docs/screenshots/landing-mobile-dark.png" alt="Sideband landing page, dark theme, mobile" width="300" /> |
 
 Full-page captures: [light](./docs/screenshots/landing-desktop-light-full.png) ·
-[dark](./docs/screenshots/landing-desktop-dark-full.png) ·
-[hero animation, mobile](./docs/screenshots/landing-mobile-light-demo.png).
+[dark](./docs/screenshots/landing-desktop-dark-full.png).
+
+Explainers added to the page (inline SVG + CSS, `prefers-reduced-motion` safe, no metrics or
+partner claims):
+
+| Three-phase storyboard | Spend-cap / voucher explainer |
+|---|---|
+| <img src="./docs/screenshots/landing-storyboard-light.png" alt="Storyboard: fund online, stream vouchers offline, settle online" /> | <img src="./docs/screenshots/landing-explainer-dark.png" alt="Interactive spend cap and cumulative voucher explainer, dark theme" /> |
+| **Contract lifecycle (under the hood)** | **Illustrated example use cases** |
+| <img src="./docs/screenshots/landing-lifecycle-light.png" alt="Step-through of init, top_up, settle, close_start, refund" /> | <img src="./docs/screenshots/landing-usecases-dark.png" alt="Example scenarios: local captions, edge compute, metered Wi-Fi where permitted" /> |
+
+Android download at 360 px: [direct latest-APK button, all releases, install help](./docs/screenshots/landing-download-mobile-light.png).
 
 ## Quickstart
 
