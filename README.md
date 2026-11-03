@@ -105,9 +105,11 @@ The site never shows store links unless real listings are configured; see
 | Voucher validation and anti-replay | Implemented, tested |
 | Metered demo service, usage meter | Implemented, tested |
 | Settlement intents and reconciliation | Implemented, tested with a fake Soroban client |
+| `settle` (channel stays open) vs `close`; `SETTLE_MODE`, auto-settle and dispute watcher | Implemented, tested |
+| Several sessions per channel (protocol v2 baseline) | Implemented, tested (also e2e from the Dart payer) |
 | `ADAPTER=soroban` against Testnet | **Not run**: default runtime is the in-memory test adapter (`synthetic: true`, never `CONFIRMED`) |
-| Multi-instance rate limiting, TLS, key rotation, metrics | Not implemented |
-| Landing site | Implemented: static export, 27 tests (accessibility, honesty, store-badge gating) |
+| Durable settlement intents, multi-instance rate limiting, TLS, key rotation, metrics | Not implemented |
+| Landing site | Implemented: static export, animated explainers, direct latest-APK download; 36 tests |
 | Hosted deployment of the site | None yet |
 
 ### Compatibility

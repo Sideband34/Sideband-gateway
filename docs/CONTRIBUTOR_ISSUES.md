@@ -10,25 +10,28 @@ boundary per issue. Cross-repo work is listed at the end and needs a linked PR i
 
 ## Open work
 
-- [ ] **Wire `ADAPTER=soroban` end to end on Testnet.** *Acceptance:* a settlement reaches
-  `CONFIRMED` only with finality evidence from Testnet; `docs/DEPLOYMENT.md` explains setup.
-  *Blocked on:* channels Testnet deploy. *Size:* M. Label: `stellar`.
-- [ ] **Metrics and health detail.** Prometheus-style counters for vouchers accepted/rejected by
-  reason, 402s, settlement states. *Acceptance:* no secrets or keys in labels; tests for counters.
-  *Size:* S. `good first issue`.
-- [ ] **Shared rate limiting.** Pluggable store so limits hold across instances. *Acceptance:*
-  contract tests run against in-memory and SQLite implementations. *Size:* M.
-- [ ] **Admin token rotation.** Accept a current and a next token during rotation. *Size:* S.
-- [ ] **Landing: device matrix from data.** Drive `/devices` from a checked-in JSON file updated
-  only by on-device test results. *Acceptance:* tests still forbid "Supported" without evidence.
-  *Size:* S. `good first issue`.
+- [ ] **Wire `ADAPTER=soroban` end to end on Testnet.** *Acceptance:* `settle` and `close`
+  intents reach `CONFIRMED` only with finality evidence from Testnet; `docs/DEPLOYMENT.md`
+  explains setup. *Blocked on:* channels Testnet deploy. *Size:* M. Label: `stellar`.
+- [ ] **Watch for payer `close_start` via events.** `settleDue` polls bindings; subscribe to the
+  contract's `close_started` events instead. *Acceptance:* a fake event source triggers a
+  `close` intent within one interval. *Size:* M.
+- [ ] **Durable settlement intents.** Intents live in memory; persist them in SQLite like vouchers.
+  *Acceptance:* a restart in `RECONCILING` resumes reconciliation by hash. *Size:* M.
+- [ ] **Metrics.** Counters for vouchers accepted/rejected by reason, 402s and settlement states.
+  *Acceptance:* no secrets in labels; tests for counters. *Size:* S. `good first issue`.
+- [ ] **Shared rate limiting** across instances. *Acceptance:* contract tests run against
+  in-memory and SQLite implementations. *Size:* M.
+- [ ] **Landing: device matrix from data.** Drive `/devices` from a JSON file updated only by
+  on-device test results. *Acceptance:* tests still forbid "Supported" without evidence. *Size:* S.
 
 ## Cross-repository
 
 - [ ] **Integration lockfile.** A file in each repo pinning the tested sibling tags/SHAs, checked in
   CI. *Acceptance:* CI fails when a pinned sibling fixture differs. *Size:* M.
-- [ ] **Testnet end-to-end demo.** Fund → offline session → settle on Testnet with recorded
-  transaction hashes, driven from a clean checkout. *Blocked on:* channels Testnet deploy, gateway
-  Soroban wiring. *Size:* L.
-- [ ] **Physical-device compatibility harness.** Two-phone BLE/Wi-Fi run with a published matrix.
-  *Blocked on:* protocol transport adapters. *Size:* L.
+- [ ] **Testnet end-to-end demo.** Fund → offline session (two sessions on one channel) → settle on
+  Testnet with recorded transaction hashes, driven from a clean checkout. *Blocked on:* running
+  `scripts/deploy-testnet.sh` in Sideband-channels, gateway Soroban wiring. *Size:* L.
+- [ ] **Physical-device compatibility harness.** Two-phone BLE run of the mobile `BleTransport`
+  with a published matrix. *Acceptance:* a frame exchange of 10+ vouchers recorded per device
+  pair; no row marked supported without a run. *Size:* L.
