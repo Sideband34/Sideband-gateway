@@ -94,10 +94,32 @@ server.listen(config.port, config.host, () => {
   console.log(`provider public key: ${kp.publicKey()}`);
 });
 
+// Long-running providers: withdraw with `settle` once unsettled value reaches
+// AUTO_SETTLE_AMOUNT, and answer a payer close_start with our highest voucher.
+let autoSettle: NodeJS.Timeout | undefined;
+if (config.autoSettleStroops > 0n) {
+  let busy = false;
+  autoSettle = setInterval(() => {
+    if (busy) return;
+    busy = true;
+    gateway
+      .settleDue(config.autoSettleStroops)
+      .then((intents) => {
+        for (const i of intents) console.log(`auto ${i.kind} ${i.channelId}: ${i.state}`);
+      })
+      .catch((e: unknown) => console.error('auto-settle failed:', (e as Error).message))
+      .finally(() => {
+        busy = false;
+      });
+  }, config.autoSettleIntervalSec * 1000);
+  autoSettle.unref();
+}
+
 let stopping = false;
 async function stop(signal: string) {
   if (stopping) return;
   stopping = true;
+  if (autoSettle) clearInterval(autoSettle);
   console.log(`${signal}: shutting down`);
   const intents = await gateway.shutdown();
   console.log(`prepared ${intents.length} settlement intent(s)`);

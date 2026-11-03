@@ -4,7 +4,8 @@ info:
   version: 1.0.0
   description: >
     v1 of the provider gateway API (pre-release, Testnet/synthetic only).
-    Frames use sideband-protocol v1 field names. A voucher is a signed
+    Frames use sideband-protocol field names (v1, plus the v2
+    session_accept.baseline for reusing a channel). A voucher is a signed
     commitment, never settled funds. Errors: {error:{code,message,requestId}}.
 paths:
   /v1/health:
@@ -18,10 +19,12 @@ paths:
       responses: { '201': { description: service_offer }, '503': { description: shutting_down } }
   /v1/sessions/accept:
     post:
-      summary: Bind a funded channel (session_accept frame)
+      summary: Bind a funded channel (session_accept frame, v1 or v2)
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/SessionAccept' } } } }
       responses:
         '200': { description: active }
-        '409': { description: "no_funded_channel, wrong_network, wrong_provider, channel_not_open, channel_expired, channel_in_use, replayed_nonce, spend_exceeds_offer, spend_exceeds_deposit, offer_expired, bad_state" }
+        '400': { description: "invalid_request (e.g. baseline in v1, missing baseline in v2)" }
+        '409': { description: "no_funded_channel, wrong_network, wrong_provider, channel_not_open, channel_closing, channel_expired, channel_in_use, channel_settling, baseline_mismatch (with expectedBaseline), replayed_nonce, spend_exceeds_offer, spend_exceeds_deposit, offer_expired, bad_state" }
         '403': { description: unauthorized_payer }
   /v1/sessions/{id}/vouchers:
     post:
@@ -37,15 +40,21 @@ paths:
   /v1/sessions/{id}/meter:
     post: { summary: Compare payer and provider unit counts, responses: { '200': { description: sample + discrepancy } } }
   /v1/sessions/{id}/usage:
-    get: { summary: Usage; settlement is always NOT_SETTLED here, responses: { '200': { description: usage } } }
+    get: { summary: "Usage (owed, baseline, sessionCommitted, highestVoucher, unpaid); settlement is always NOT_SETTLED here", responses: { '200': { description: usage } } }
   /v1/sessions/{id}/close:
     post: { summary: Close a session, responses: { '200': { description: usage } } }
   /v1/channels/{id}/settle:
     post:
-      summary: Prepare and submit settlement; returns a stateful intent
-      responses: { '202': { description: "intent state CREATED|AUTHORIZED|SUBMITTED|RECONCILING|FAILED|CONFIRMED" } }
+      summary: >
+        Prepare and submit settlement; returns a stateful intent with kind.
+        mode=settle withdraws up to the highest voucher and keeps the channel
+        open; mode=close withdraws and refunds the rest. Default: SETTLE_MODE.
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/SettleRequest' } } } }
+      responses:
+        '202': { description: "intent {intentId, kind, state CREATED|AUTHORIZED|SUBMITTED|RECONCILING|FAILED|CONFIRMED, amount, txHash?}" }
+        '409': { description: "nothing_to_settle, channel_not_open, bad_state" }
   /v1/channels/{id}/status:
-    get: { summary: Channel and settlement state, responses: { '200': { description: status } } }
+    get: { summary: "Channel state (onChainStatus open|closing|closed|refunded, deposit, withdrawn, unsettled, closeEffectiveAt + disputeWindowOpen while closing) and latest settlement intent", responses: { '200': { description: status } } }
 security:
   - sessionToken: []
 components:
@@ -66,3 +75,22 @@ components:
       properties:
         schemaVersion: { const: 1 }
         requestId: { type: string }
+    SessionAccept:
+      type: object
+      additionalProperties: false
+      required: [type, v, session, channelRef, maxSpend, nonce]
+      properties:
+        type: { const: session_accept }
+        v: { enum: [1, 2] }
+        session: { type: string }
+        channelRef: { type: string }
+        maxSpend: { type: string, description: budget for this session on top of baseline }
+        nonce: { type: string }
+        baseline:
+          type: string
+          description: required when v=2, forbidden when v=1; must equal the provider's highest accepted voucher on the channel
+    SettleRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        mode: { enum: [settle, close] }

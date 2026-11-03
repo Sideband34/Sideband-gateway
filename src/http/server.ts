@@ -30,16 +30,24 @@ const amountStr = z.string().refine((s) => {
 }, 'invalid amount');
 
 const OfferBody = z.object({ schemaVersion: z.literal(1), requestId: str.optional() }).strict();
+// v1: fresh channel. v2 (Sideband-protocol ADR 0001): carries `baseline`, the
+// channel cumulative already committed, so sessions can reuse a channel.
 const AcceptBody = z
   .object({
     type: z.literal('session_accept'),
-    v: z.literal(1),
+    v: z.union([z.literal(1), z.literal(2)]),
     session: str,
     channelRef: str,
     maxSpend: amountStr,
     nonce: str,
+    baseline: amountStr.optional(),
   })
-  .strict();
+  .strict()
+  .refine((b) => (b.v === 1 ? b.baseline === undefined : b.baseline !== undefined), {
+    message: 'baseline is required in v2 and not allowed in v1',
+    path: ['baseline'],
+  });
+const SettleBody = z.object({ mode: z.enum(['settle', 'close']).optional() }).strict();
 const VoucherBody = z
   .object({
     type: z.literal('voucher'),
@@ -106,6 +114,7 @@ function send(res: ServerResponse, status: number, body: unknown): void {
 
 const intentJson = (i: {
   id: string;
+  kind: string;
   state: string;
   channelId: string;
   amount: bigint;
@@ -113,6 +122,7 @@ const intentJson = (i: {
   failure?: string | undefined;
 }) => ({
   intentId: i.id,
+  kind: i.kind,
   state: i.state,
   channelId: i.channelId,
   amount: formatAmount(i.amount),
@@ -164,6 +174,7 @@ export function createHttpServer(gw: ProviderGateway, opts: HttpOptions): Server
           channelRef: b.channelRef,
           maxSpend: parseAmount(b.maxSpend),
           nonce: b.nonce,
+          ...(b.baseline !== undefined ? { baseline: parseAmount(b.baseline) } : {}),
         });
         return send(res, 200, { session: r.session, status: r.phase });
       }
@@ -206,7 +217,8 @@ export function createHttpServer(gw: ProviderGateway, opts: HttpOptions): Server
         requireAdmin(opts.adminToken, req.headers['x-admin-token']);
         if (method === 'POST' && m[2] === 'settle') {
           // Returns a stateful intent, never a fake immediate success.
-          return send(res, 202, intentJson(await gw.settle(id)));
+          const b = parse(SettleBody, await readJson(req));
+          return send(res, 202, intentJson(await gw.settle(id, b.mode)));
         }
         if (method === 'GET' && m[2] === 'status')
           return send(res, 200, await gw.channelStatus(id));

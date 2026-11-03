@@ -164,19 +164,105 @@ describe('HTTP API v1', () => {
       admin,
     );
     expect(settle.status).toBe(202);
-    expect(settle.json).toMatchObject({ state: 'SUBMITTED', amount: '0.002' });
+    expect(settle.json).toMatchObject({ kind: 'settle', state: 'SUBMITTED', amount: '0.002' });
     expect(settle.json.state).not.toBe('CONFIRMED');
-    const status = await call(
-      'GET',
-      `/v1/channels/${h.channelId}/status`,
+    const status = async () =>
+      (await call('GET', `/v1/channels/${h.channelId}/status`, undefined, undefined, admin)).json;
+    expect(await status()).toMatchObject({
+      onChainStatus: 'open',
+      withdrawn: '0.002',
+      settlement: { kind: 'settle', state: 'SUBMITTED' },
+    });
+
+    // A second session reuses the channel with a v2 accept carrying the baseline.
+    const o2 = await call('POST', '/v1/sessions/offer', { schemaVersion: 1 });
+    const auth2 = { authorization: `Bearer ${o2.headers.get('x-sideband-session-token')}` };
+    await call('POST', `/v1/sessions/${offer.session}/close`, {}, undefined, auth);
+    const v1Reuse = await call(
+      'POST',
+      '/v1/sessions/accept',
+      {
+        type: 'session_accept',
+        v: 1,
+        session: o2.json.session,
+        channelRef: h.channelId,
+        maxSpend: '1',
+        nonce: 'http-n2',
+      },
       undefined,
+      auth2,
+    );
+    expect(v1Reuse.status).toBe(409);
+    expect(v1Reuse.json.error).toMatchObject({
+      code: 'baseline_mismatch',
+      expectedBaseline: '0.002',
+    });
+    const acc2 = await call(
+      'POST',
+      '/v1/sessions/accept',
+      {
+        type: 'session_accept',
+        v: 2,
+        session: o2.json.session,
+        channelRef: h.channelId,
+        maxSpend: '1',
+        nonce: 'http-n3',
+        baseline: '0.002',
+      },
+      undefined,
+      auth2,
+    );
+    expect(acc2.json).toMatchObject({ status: 'active' });
+
+    const close = await call(
+      'POST',
+      `/v1/channels/${h.channelId}/settle`,
+      { mode: 'close' },
       undefined,
       admin,
     );
-    expect(status.json).toMatchObject({
+    expect(close.json).toMatchObject({ kind: 'close', state: 'SUBMITTED', amount: '0.002' });
+    expect(await status()).toMatchObject({
       onChainStatus: 'closed',
-      settlement: { state: 'SUBMITTED' },
+      settlement: { kind: 'close', state: 'SUBMITTED' },
     });
+    const badMode = await call(
+      'POST',
+      `/v1/channels/${h.channelId}/settle`,
+      { mode: 'yolo' },
+      undefined,
+      admin,
+    );
+    expect(badMode.status).toBe(400);
+  });
+
+  it('validates v1/v2 accept shapes (baseline only in v2)', async () => {
+    const { h, call } = await start();
+    const o = await call('POST', '/v1/sessions/offer', { schemaVersion: 1 });
+    const auth = { authorization: `Bearer ${o.headers.get('x-sideband-session-token')}` };
+    const base = {
+      type: 'session_accept',
+      session: o.json.session,
+      channelRef: h.channelId,
+      maxSpend: '1',
+      nonce: 'shape-n',
+    };
+    for (const body of [
+      { ...base, v: 1, baseline: '0' },
+      { ...base, v: 2 },
+      { ...base, v: 3, baseline: '0' },
+      { ...base, v: 2, baseline: 'x' },
+    ]) {
+      expect((await call('POST', '/v1/sessions/accept', body, undefined, auth)).status).toBe(400);
+    }
+    const ok = await call(
+      'POST',
+      '/v1/sessions/accept',
+      { ...base, v: 2, baseline: '0' },
+      undefined,
+      auth,
+    );
+    expect(ok.json).toMatchObject({ status: 'active' });
   });
 
   it('returns the documented error schema for bad input', async () => {
