@@ -458,7 +458,16 @@ export class ProviderGateway {
       ...(binding.closeEffectiveAt !== undefined
         ? { closeEffectiveAt: binding.closeEffectiveAt, disputeWindowOpen: true }
         : {}),
-      settlement: intent ? { id: intent.id, kind: intent.kind, state: intent.state } : null,
+      settlement: intent
+        ? {
+            id: intent.id,
+            kind: intent.kind,
+            state: intent.state,
+            // the operator needs the ledger hash and the reason a settlement failed (status is admin-only)
+            ...(intent.txHash ? { txHash: intent.txHash } : {}),
+            ...(intent.failure ? { failure: intent.failure } : {}),
+          }
+        : null,
     };
   }
 

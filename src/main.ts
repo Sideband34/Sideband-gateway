@@ -4,7 +4,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { RateLimiter } from './http/ratelimit.js';
-import { Keypair, rpc } from '@stellar/stellar-sdk';
+import { Keypair } from '@stellar/stellar-sdk';
 import {
   InMemoryChannelAdapter,
   NETWORK_PASSPHRASES,
@@ -39,8 +39,9 @@ function need(k: string): string {
 // UNVERIFIED against a live network: see README. Default is the labeled test adapter.
 const adapter = useSoroban
   ? new SorobanChannelAdapter({
-      client: new RpcSorobanClient(
-        new rpc.Server(need('SOROBAN_RPC_URL')),
+      // forUrl: the RPC server must come from the channels package's own SDK copy (two copies cannot share XDR objects).
+      client: RpcSorobanClient.forUrl(
+        need('SOROBAN_RPC_URL'),
         NETWORK_PASSPHRASES[config.network],
         kp.publicKey(),
       ),
@@ -89,7 +90,7 @@ const server = createHttpServer(gateway, {
 });
 server.listen(config.port, config.host, () => {
   console.log(
-    `sideband-gateway (TEST ADAPTER, ${config.network}) on ${config.host}:${config.port}`,
+    `sideband-gateway (${useSoroban ? 'SOROBAN ADAPTER' : 'TEST ADAPTER'}, ${config.network}) on ${config.host}:${config.port}`,
   );
   console.log(`provider public key: ${kp.publicKey()}`);
 });

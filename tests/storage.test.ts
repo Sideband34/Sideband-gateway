@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -21,6 +21,17 @@ const tmp = () => {
   dirs.push(d);
   return join(d, 'gw.db');
 };
+
+describe('openDb', () => {
+  it('creates a missing parent directory on first start (DB_PATH=./data/gateway.db)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'sbgw-'));
+    dirs.push(root);
+    const path = join(root, 'nested', 'data', 'gw.db');
+    const db = openDb(path);
+    db.close();
+    expect(existsSync(path)).toBe(true);
+  });
+});
 
 describe('SQLite voucher + nonce stores', () => {
   it('compare-and-set only succeeds against the expected previous value', async () => {

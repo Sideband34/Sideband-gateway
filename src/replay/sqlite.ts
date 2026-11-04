@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { StoredVoucher, VoucherStore, Voucher } from '@sideband/channels';
 import type { SessionRecord, SessionStore } from '../gateway.js';
@@ -5,6 +7,8 @@ import type { NonceStore } from './nonces.js';
 
 /** Opens (and migrates) the gateway's SQLite database. */
 export function openDb(path: string): DatabaseSync {
+  // DB_PATH=./data/gateway.db must work on a first start; only create a directory for real files.
+  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec(`
     PRAGMA journal_mode = WAL;

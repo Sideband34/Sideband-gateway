@@ -47,6 +47,22 @@ async function start(h?: Harness, opts: Partial<HttpOptions> = {}) {
 }
 
 describe('HTTP API v1', () => {
+  it('hides internals from the client but logs the cause with the request id', async () => {
+    const logs: string[] = [];
+    const h = await harness();
+    h.gw.createOffer = () => {
+      throw new Error('boom: rpc exploded');
+    };
+    const { call } = await start(h, { logError: (l) => logs.push(l) });
+    const r = await call('POST', '/v1/sessions/offer', { schemaVersion: 1 });
+    expect(r.status).toBe(500);
+    expect(r.json.error).toMatchObject({ code: 'internal', message: 'Internal error' });
+    expect(JSON.stringify(r.json)).not.toContain('boom');
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain('boom: rpc exploded');
+    expect(logs[0]).toContain(r.json.error.requestId);
+  });
+
   it('serves health and a signed manifest', async () => {
     const { call } = await start();
     const health = await call('GET', '/v1/health');
@@ -171,7 +187,7 @@ describe('HTTP API v1', () => {
     expect(await status()).toMatchObject({
       onChainStatus: 'open',
       withdrawn: '0.002',
-      settlement: { kind: 'settle', state: 'SUBMITTED' },
+      settlement: { kind: 'settle', state: 'SUBMITTED', txHash: expect.stringMatching(/^.{8,}$/) },
     });
 
     // A second session reuses the channel with a v2 accept carrying the baseline.

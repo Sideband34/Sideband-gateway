@@ -14,6 +14,8 @@ export interface HttpOptions {
   adminToken?: string;
   /** Defaults to 60 requests burst, 20/s refill per client address. */
   limiter?: RateLimiter;
+  /** Receives unexpected (non-GatewayError) failures with their requestId. Defaults to console.error. The client only ever sees a generic message. */
+  logError?: (line: string) => void;
 }
 
 export const SCHEMA_VERSION = 1;
@@ -236,7 +238,10 @@ export function createHttpServer(gw: ProviderGateway, opts: HttpOptions): Server
           error: { code: 'invalid_request', message: e.message, requestId },
         });
       }
-      // Never leak internals.
+      // Never leak internals to the client, but never swallow them either: the operator needs the cause.
+      (opts.logError ?? console.error)(
+        `unhandled error requestId=${requestId}: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`,
+      );
       send(res, 500, { error: { code: 'internal', message: 'Internal error', requestId } });
     }
   });
