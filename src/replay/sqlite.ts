@@ -4,6 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 import type { StoredVoucher, VoucherStore, Voucher } from '@sideband/channels';
 import type { SessionRecord, SessionStore } from '../gateway.js';
 import type { NonceStore } from './nonces.js';
+import type { IntentStore } from '../settlement/service.js';
+import type { SettlementIntent } from '@sideband/channels';
 
 /** Opens (and migrates) the gateway's SQLite database. */
 export function openDb(path: string): DatabaseSync {
@@ -17,6 +19,13 @@ export function openDb(path: string): DatabaseSync {
       cumulative TEXT NOT NULL,      -- integer stroops as text (bigint-safe)
       voucher    TEXT NOT NULL       -- JSON
     );
+    CREATE TABLE IF NOT EXISTS intents (
+      id         TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL,
+      seq        INTEGER NOT NULL,   -- save order; the highest seq per channel is the latest intent
+      json       TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS intents_channel ON intents (channel_id, seq);
     CREATE TABLE IF NOT EXISTS sessions (
       id   TEXT PRIMARY KEY,
       json TEXT NOT NULL
@@ -85,5 +94,31 @@ export class SqliteSessionStore implements SessionStore {
     return (this.db.prepare('SELECT json FROM sessions').all() as { json: string }[]).map(
       (r) => JSON.parse(r.json) as SessionRecord,
     );
+  }
+}
+
+// bigint-safe JSON for settlement intents (amount is a bigint)
+const replacer = (_k: string, v: unknown) =>
+  typeof v === 'bigint' ? { $bigint: v.toString() } : v;
+const reviver = (_k: string, v: unknown) =>
+  v && typeof v === 'object' && '$bigint' in v ? BigInt((v as { $bigint: string }).$bigint) : v;
+
+/** Durable settlement intents: a restart no longer forgets an in-flight or confirmed settlement. */
+export class SqliteIntentStore implements IntentStore {
+  constructor(private readonly db: DatabaseSync) {}
+  latestForChannel(channelId: string): SettlementIntent | undefined {
+    const row = this.db
+      .prepare('SELECT json FROM intents WHERE channel_id = ? ORDER BY seq DESC LIMIT 1')
+      .get(channelId) as { json: string } | undefined;
+    return row ? (JSON.parse(row.json, reviver) as SettlementIntent) : undefined;
+  }
+  save(i: SettlementIntent): void {
+    this.db
+      .prepare(
+        `INSERT INTO intents (id, channel_id, seq, json)
+         VALUES (?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM intents), ?)
+         ON CONFLICT(id) DO UPDATE SET json = excluded.json, seq = excluded.seq`,
+      )
+      .run(i.id, i.channelId, JSON.stringify(i, replacer));
   }
 }

@@ -107,8 +107,9 @@ The site never shows store links unless real listings are configured; see
 | Settlement intents and reconciliation | Implemented, tested with a fake Soroban client |
 | `settle` (channel stays open) vs `close`; `SETTLE_MODE`, auto-settle and dispute watcher | Implemented, tested |
 | Several sessions per channel (protocol v2 baseline) | Implemented, tested (also e2e from the Dart payer) |
-| `ADAPTER=soroban` against Testnet | **Not run**: default runtime is the in-memory test adapter (`synthetic: true`, never `CONFIRMED`) |
-| Durable settlement intents, multi-instance rate limiting, TLS, key rotation, metrics | Not implemented |
+| `ADAPTER=soroban` against Testnet | **Run on 2026-11-04** against channels deployed on Testnet: offer, accept (channel read from Soroban), 402, voucher, serve, `settle` and `close` CONFIRMED, threshold auto-settle, payer `close_start` answered inside the dispute window (hashes in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)). The default runtime is still the in-memory test adapter (`synthetic: true`, never `CONFIRMED`). Native asset only; not audited |
+| Durable settlement intents (SQLite via `DB_PATH`) | Implemented and unit-tested across a simulated restart; **not yet re-verified live after a real process restart** |
+| Multi-instance rate limiting, TLS, key rotation, metrics | Not implemented |
 | Landing site | Implemented: static export, animated explainers, direct latest-APK download; 36 tests |
 | Hosted deployment of the site | None yet |
 

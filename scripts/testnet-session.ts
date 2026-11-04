@@ -12,6 +12,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { Keypair } from '@stellar/stellar-sdk';
 import { NETWORK_PASSPHRASES, createVoucher, keypairSigner, parseAmount } from '@sideband/channels';
 
@@ -32,7 +33,8 @@ const env = Object.fromEntries(
 ) as Record<string, string>;
 
 function secretOf(alias: string): Keypair {
-  const r = spawnSync('stellar', ['keys', 'show', alias], { encoding: 'utf8' });
+  // cwd: stellar-cli also reads a .env in the working directory (our SOROBAN_RPC_URL would override --network)
+  const r = spawnSync('stellar', ['keys', 'show', alias], { encoding: 'utf8', cwd: tmpdir() });
   if (r.status !== 0) throw new Error(`no stellar-cli key named ${alias}`);
   return Keypair.fromSecret(r.stdout.trim());
 }
@@ -42,14 +44,24 @@ async function call(
   path: string,
   o: { body?: unknown; headers?: Record<string, string> } = {},
 ) {
-  const res = await fetch(BASE + path, {
-    method,
-    headers: {
-      ...(o.body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(o.headers ?? {}),
-    },
-    ...(o.body !== undefined ? { body: JSON.stringify(o.body) } : {}),
-  });
+  let res!: Response;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await fetch(BASE + path, {
+        method,
+        headers: {
+          ...(o.body !== undefined ? { 'content-type': 'application/json' } : {}),
+          ...(o.headers ?? {}),
+        },
+        ...(o.body !== undefined ? { body: JSON.stringify(o.body) } : {}),
+      });
+      break;
+    } catch (err) {
+      // a transport blip to the local gateway while it is busy with RPC calls; retry, never hide a real error
+      if (attempt >= 5) throw err;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
   return { status: res.status, json: (await res.json()) as Json, headers: res.headers };
 }
 
@@ -167,7 +179,7 @@ async function main(): Promise<void> {
         '--',
         'close_start',
       ],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', cwd: tmpdir() },
     );
     need(cs.status === 0, 'payer close_start', (cs.stderr ?? '').slice(0, 400));
     note('payer started a close on-chain', {
@@ -176,15 +188,15 @@ async function main(): Promise<void> {
     let s2: Json = {};
     for (let i = 0; i < 60; i++) {
       s2 = (await call('GET', `/v1/channels/${channelId}/status`, { headers: admin })).json;
-      if (s2.onChainStatus === 'closed') break;
+      if (s2.withdrawn === amount) break;
       await new Promise((r) => setTimeout(r, 5000));
     }
     need(
-      s2.onChainStatus === 'closed' && s2.withdrawn === amount,
+      (s2.onChainStatus === 'closing' || s2.onChainStatus === 'closed') && s2.withdrawn === amount,
       'gateway answered the payer close with the highest voucher inside the window',
       s2,
     );
-    note('gateway auto-closed with the highest voucher', {
+    note('gateway answered the payer close with the highest voucher', {
       withdrawn: s2.withdrawn,
       txHash: s2.settlement?.txHash,
     });

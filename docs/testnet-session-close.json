@@ -1,0 +1,76 @@
+{
+  "network": "testnet",
+  "gateway": "http://127.0.0.1:5001",
+  "channelId": "CBLNJF3LQTS2XZICOF5ELI5UXH6WBNZKRHARNWT2SHHV4SAWZWRE3YWF",
+  "payer": "GC7ZWRDXDPR6OFB6R72463R6PQQJHOEII5EVEEKOSK5ZQDQRYJSHPHRX",
+  "provider": "GBGVFJ3SDXJMUHW7WDZQSV6GXNU6MVY2BMTK2G6QREAZYW7OI64J75MP",
+  "mode": "close",
+  "requiredCumulative": "0.002",
+  "settlement": {
+    "id": "62e01b58eb1ac8deb0bd25658148dee9766ce133e03aafc9fd4dc285d79db089",
+    "kind": "close",
+    "state": "CONFIRMED",
+    "txHash": "7cb93601ec15dd96ef6a475f435cb5c869254d8f4964ff0f0b0b04df706080e7"
+  },
+  "onChainStatus": "closed",
+  "withdrawn": "0.002",
+  "steps": [
+    {
+      "name": "offer received",
+      "detail": {
+        "session": "63e30c2a-5182-4b16-88f3-ddfc6806e8f6"
+      }
+    },
+    {
+      "name": "accepted; gateway read the channel from Soroban",
+      "detail": {
+        "channelId": "CBLNJF3LQTS2XZICOF5ELI5UXH6WBNZKRHARNWT2SHHV4SAWZWRE3YWF"
+      }
+    },
+    {
+      "name": "402 payment_required",
+      "detail": {
+        "requiredCumulative": "0.002"
+      }
+    },
+    {
+      "name": "voucher accepted, honestly NOT settled",
+      "detail": {
+        "status": "COMMITMENT_ACCEPTED_NOT_SETTLED"
+      }
+    },
+    {
+      "name": "replayed voucher refused (409)"
+    },
+    {
+      "name": "paid request served",
+      "detail": {
+        "units": 2
+      }
+    },
+    {
+      "name": "usage",
+      "detail": {
+        "units": 2,
+        "owed": "0.002",
+        "settlement": "NOT_SETTLED"
+      }
+    },
+    {
+      "name": "close submitted",
+      "detail": {
+        "state": "CONFIRMED",
+        "amount": "0.002"
+      }
+    },
+    {
+      "name": "close CONFIRMED",
+      "detail": {
+        "txHash": "7cb93601ec15dd96ef6a475f435cb5c869254d8f4964ff0f0b0b04df706080e7",
+        "onChainStatus": "closed",
+        "withdrawn": "0.002"
+      }
+    }
+  ],
+  "at": "2026-11-04T18:01:55.587Z"
+}

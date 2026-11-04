@@ -6,6 +6,14 @@ Testnet/synthetic only.
 ## [Unreleased]
 
 ### Added
+- Durable settlement intents (`IntentStore`, SQLite via `DB_PATH`); `scripts/testnet-session.ts` live driver.
+- Admin channel status shows the settlement `txHash` and `failure`.
+
+### Fixed (found by the first live Testnet run, 2026-11-04)
+- The Soroban client is built with `RpcSorobanClient.forUrl` (two SDK copies produced invalid transactions).
+- Unexpected errors are logged server-side with the request id; `openDb` creates the database directory; banner shows the real adapter; `.env.example` uses `SOROBAN_RPC_URL`.
+
+### Added
 - Several sessions per channel: `session_accept` v2 with `baseline`, refused on mismatch
   (`baseline_mismatch` with `expectedBaseline`); per-session meter, budget and usage
   (`baseline`, `sessionCommitted`).

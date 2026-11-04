@@ -31,13 +31,31 @@ const LOCKED = new Set(['SUBMITTED', 'RECONCILING', 'CONFIRMED']);
  * - `close` withdraws and refunds the rest. While a close is in flight or done
  *   the channel is locked: no new sessions or vouchers.
  */
-export class SettlementService {
+/** Where settlement intents live. The default is memory (lost on restart); main.ts passes a SQLite store. */
+export interface IntentStore {
+  /** The most recently SAVED intent for the channel. */
+  latestForChannel(channelId: string): SettlementIntent | undefined;
+  save(intent: SettlementIntent): void;
+}
+
+export class InMemoryIntentStore implements IntentStore {
   private readonly intents = new Map<string, SettlementIntent>();
   private readonly byChannel = new Map<string, string>();
+  latestForChannel(channelId: string): SettlementIntent | undefined {
+    const id = this.byChannel.get(channelId);
+    return id ? this.intents.get(id) : undefined;
+  }
+  save(i: SettlementIntent): void {
+    this.intents.set(i.id, i);
+    this.byChannel.set(i.channelId, i.id);
+  }
+}
 
+export class SettlementService {
   constructor(
     private readonly adapter: ChannelAdapter,
     private readonly vouchers: VoucherStore,
+    private readonly store: IntentStore = new InMemoryIntentStore(),
   ) {}
 
   /** Once a close is in flight, the settled amount is fixed and the channel is done. */
@@ -48,13 +66,11 @@ export class SettlementService {
 
   /** Latest intent for the channel. */
   get(channelId: string): SettlementIntent | undefined {
-    const id = this.byChannel.get(channelId);
-    return id ? this.intents.get(id) : undefined;
+    return this.store.latestForChannel(channelId);
   }
 
   private save(i: SettlementIntent): SettlementIntent {
-    this.intents.set(i.id, i);
-    this.byChannel.set(i.channelId, i.id);
+    this.store.save(i);
     return i;
   }
 

@@ -19,6 +19,7 @@ import {
   SqliteNonceStore,
   SqliteSessionStore,
   SqliteVoucherStore,
+  SqliteIntentStore,
   openDb,
 } from './replay/sqlite.js';
 import { SettlementService } from './settlement/service.js';
@@ -58,7 +59,7 @@ const gateway = new ProviderGateway({
   adapter,
   vouchers,
   nonces: config.dbPath === ':memory:' ? new InMemoryNonceStore() : new SqliteNonceStore(db),
-  settlement: new SettlementService(adapter, vouchers),
+  settlement: new SettlementService(adapter, vouchers, new SqliteIntentStore(db)),
   now,
   sessions: new SqliteSessionStore(db),
 });

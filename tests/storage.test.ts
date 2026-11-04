@@ -4,12 +4,14 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { acceptVoucher, parseAmount } from '@sideband/channels';
 import {
+  SqliteIntentStore,
   SqliteNonceStore,
   SqliteSessionStore,
   SqliteVoucherStore,
   openDb,
 } from '../src/replay/sqlite.js';
 import { ProviderGateway } from '../src/gateway.js';
+import { SettlementService } from '../src/settlement/service.js';
 import { S, activeSession, harness } from './helpers.js';
 
 const dirs: string[] = [];
@@ -180,6 +182,52 @@ describe('persistent session and meter state', () => {
       phase: 'closed',
       closeReason: 'restore_channel_unavailable',
     });
+    db2.close();
+  });
+});
+
+describe('SqliteIntentStore (settlement intents survive a restart)', () => {
+  it('keeps bigint amounts and returns the most recently saved intent per channel', async () => {
+    const path = tmp();
+    const h = await harness();
+    const id = await activeSession(h);
+    await h.gw.submitVoucher(id, h.voucher('0.004'));
+    const first = await h.gw.settle(h.channelId, 'settle');
+
+    const db1 = openDb(path);
+    const store = new SqliteIntentStore(db1);
+    store.save(first);
+    const second = { ...first, id: 'second-intent', state: 'CONFIRMED' as const };
+    store.save(second);
+    // saving an older id again moves it to the front: "latest" means last saved
+    store.save(first);
+    db1.close();
+
+    const db2 = openDb(path);
+    const reopened = new SqliteIntentStore(db2);
+    const back = reopened.latestForChannel(h.channelId)!;
+    expect(back.id).toBe(first.id);
+    expect(back.amount).toBe(first.amount);
+    expect(typeof back.amount).toBe('bigint');
+    expect(reopened.latestForChannel('no-such-channel')).toBeUndefined();
+    db2.close();
+  });
+
+  it('a rebuilt SettlementService still sees an in-flight settlement and refuses to double-submit', async () => {
+    const path = tmp();
+    const h = await harness();
+    const id = await activeSession(h);
+    await h.gw.submitVoucher(id, h.voucher('0.004'));
+    const db = openDb(path);
+    const svc1 = new SettlementService(h.adapter, h.vouchers, new SqliteIntentStore(db));
+    const sent = await svc1.submit(h.channelId, 'settle');
+    db.close();
+
+    // "restart": a brand new service over the same database file
+    const db2 = openDb(path);
+    const svc2 = new SettlementService(h.adapter, h.vouchers, new SqliteIntentStore(db2));
+    expect(svc2.get(h.channelId)).toMatchObject({ id: sent.id, kind: 'settle', state: sent.state });
+    expect(svc2.get(h.channelId)!.amount).toBe(sent.amount);
     db2.close();
   });
 });
