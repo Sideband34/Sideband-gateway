@@ -3,7 +3,7 @@
 Sideband lets two nearby devices agree on a price, meter a service, and settle the bill on Stellar later. The payer signs small off-chain payment commitments. A Soroban channel contract pays them out when connectivity returns.
 
 {% hint style="warning" %}
-**Testnet prototype.** Nothing here has been audited. Everything runs on Stellar Testnet with synthetic or throwaway assets. No phone or Bluetooth hardware test has been done. Read [What is not proven](security/threat-model.md#what-is-not-proven) before you rely on any claim.
+**Testnet prototype.** Nothing here has been audited. Everything runs on Stellar Testnet with synthetic or throwaway assets. No phone or Bluetooth hardware test has been done.
 {% endhint %}
 
 ## Start here
@@ -13,10 +13,10 @@ Sideband lets two nearby devices agree on a price, meter a service, and settle t
 | Understand the idea in five minutes | [What is Sideband](introduction/what-is-sideband.md), [How it works](introduction/how-it-works.md) |
 | Know the exact rules of a channel and a session | [Channel lifecycle](concepts/channel-lifecycle.md), [Session lifecycle](concepts/session-lifecycle.md) |
 | Call the contract | [Contract functions](contract/functions.md), [Errors and events](contract/errors-and-events.md) |
-| Run a provider gateway | [Provider guide](guides/provider.md), [HTTP API](gateway/http-api.md), [Configuration](gateway/configuration.md) |
-| Build a payer | [Payer guide](guides/payer.md), [Channels SDK](sdk/channels-sdk.md), [Mobile app](mobile/overview.md) |
-| See what was verified on Testnet | [Testnet evidence](evidence/testnet-evidence.md) |
-| Contribute and earn Wave points | [Contributing](project/contributing.md) |
+| Run a provider gateway | [Gateway README](https://github.com/Sideband34/Sideband-gateway#quick-start) and [configuration](https://github.com/Sideband34/Sideband-gateway/blob/main/.env.example) |
+| Build a payer | [Channels SDK](https://github.com/Sideband34/Sideband-channels#quick-start) and [mobile app](https://github.com/Sideband34/Sideband-mobile#quick-start) |
+| See what was verified on Testnet | [Deployment evidence](https://github.com/Sideband34/Sideband-channels/blob/main/docs/DEPLOYMENT.md) |
+| Contribute and earn Wave points | [Contributing](https://github.com/Sideband34/Sideband-gateway/blob/main/CONTRIBUTING.md) |
 
 ## The four repositories
 
@@ -33,7 +33,7 @@ Sideband lets two nearby devices agree on a price, meter a service, and settle t
 | --- | --- | --- |
 | Landing page | <https://sideband-web1.vercel.app> | Vercel, built from `apps/landing` |
 | Demo gateway | <https://sideband-gateway.onrender.com> | Render free plan, **synthetic test adapter only**, sleeps when idle |
-| Channel contract on Testnet | [`CD67A4SD…5OTS`](https://stellar.expert/explorer/testnet/contract/CD67A4SD2ZWA4BPWVCJKSJ3AI4TJCHEJRUJIDUPPOWT4CEQAJOMS5OTS) | Smoke-tested, see [evidence](evidence/testnet-evidence.md) |
+| Channel contract on Testnet | [`CD67A4SD…5OTS`](https://stellar.expert/explorer/testnet/contract/CD67A4SD2ZWA4BPWVCJKSJ3AI4TJCHEJRUJIDUPPOWT4CEQAJOMS5OTS) | Smoke-tested; [deployment evidence](https://github.com/Sideband34/Sideband-channels/blob/main/docs/DEPLOYMENT.md) |
 
 ## How these docs are built
 

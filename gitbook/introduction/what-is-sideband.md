@@ -24,7 +24,7 @@ The voucher format is the commitment format of the open-source [`one-way-channel
 | Layer | Built | Verified on Testnet |
 | --- | --- | --- |
 | Wire protocol (frames, state machine) | Yes, Dart package | Unit tests and shared fixtures only |
-| Channel contract | Yes, Rust | Deployed. Settle, close and refund paths ran. See [evidence](../evidence/testnet-evidence.md). |
+| Channel contract | Yes, Rust | Deployed. Settle, close and refund paths ran. See [deployment evidence](https://github.com/Sideband34/Sideband-channels/blob/main/docs/DEPLOYMENT.md). |
 | TypeScript SDK | Yes | Used by the live gateway run |
 | Provider gateway | Yes | Ran against the deployed channel (`ADAPTER=soroban`) |
 | Payer app | Yes, Flutter | One real `top_up` through the Dart client. No phone session. |

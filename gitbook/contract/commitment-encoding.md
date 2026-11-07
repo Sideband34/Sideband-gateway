@@ -62,7 +62,7 @@ These were reproduced with the SDK's `buildPreimage`: for all four vectors the p
 
 ## Reproduce it
 
-Run this in `Sideband-gateway` after building the channels SDK (see [Local setup](../developers/local-setup.md)):
+Run this in `Sideband-gateway` after building the channels SDK (see the [gateway quick start](https://github.com/Sideband34/Sideband-gateway#quick-start)):
 
 ```ts
 import { createHash } from 'node:crypto';

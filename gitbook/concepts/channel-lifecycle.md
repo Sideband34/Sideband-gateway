@@ -38,7 +38,7 @@ Both cases were run through the SDK's in-memory adapter, which implements the sa
 | 1001000 | 1003600 | **1003600** | the window |
 
 {% hint style="info" %}
-A payer cannot reclaim funds before the channel's `expires_at`, even with a short `close_wait`. The Testnet refund smoke test needed a one-hour channel expiry for this reason. See [Testnet evidence](../evidence/testnet-evidence.md).
+A payer cannot reclaim funds before the channel's `expires_at`, even with a short `close_wait`. The Testnet refund smoke test needed a one-hour channel expiry for this reason; see the [deployment evidence](https://github.com/Sideband34/Sideband-channels/blob/main/docs/DEPLOYMENT.md).
 {% endhint %}
 
 ## Money conservation

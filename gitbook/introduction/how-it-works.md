@@ -1,6 +1,6 @@
 # How it works
 
-This page follows one payer and one provider from deposit to refund. The numbers come from a real run of the gateway on the test adapter (see [Worked example](../sdk/worked-example.md) and [HTTP API](../gateway/http-api.md)). Amounts have seven decimal places, like Stellar stroops.
+This page follows one payer and one provider from deposit to refund. The numbers come from a real run of the gateway on the test adapter; its public routes are documented in the [gateway README](https://github.com/Sideband34/Sideband-gateway#quick-start). Amounts have seven decimal places, like Stellar stroops.
 
 ## Cast
 
@@ -20,7 +20,7 @@ Example: deposit `1`, expiry two hours out, `close_wait` 3600 s.
 
 ### 2. Discover the provider (offline)
 
-The provider publishes a signed *manifest*: service id, price per unit, unit, currency, network and an expiry. The payer verifies the signature against a provider key it already trusts. See [Authentication and the signed manifest](../gateway/authentication.md).
+The provider publishes a signed *manifest*: service id, price per unit, unit, currency, network and an expiry. The payer verifies the signature against a provider key it already trusts.
 
 ### 3. Offer and accept (offline)
 

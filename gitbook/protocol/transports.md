@@ -3,7 +3,7 @@
 A transport moves opaque encoded frames between two devices. It never signs and never interprets a payment.
 
 {% hint style="warning" %}
-**Not proven on hardware.** The Bluetooth transport is covered by unit tests with a fake link only. The LAN transport was tested against an in-process server, not across real devices. See [Threat model](../security/threat-model.md#what-is-not-proven).
+**Not proven on hardware.** The Bluetooth transport is covered by unit tests with a fake link only. The LAN transport was tested against an in-process server, not across real devices.
 {% endhint %}
 
 ## The interface

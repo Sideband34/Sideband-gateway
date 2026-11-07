@@ -65,7 +65,7 @@ Then the session is `active`.
 
 ## Pay before serve
 
-The gateway does not serve work the vouchers do not cover. For each `serve` call it computes what the session would owe after the request. If that is more than the value committed in this session, plus the configured `CREDIT_ALLOWANCE` (default `0`), it answers HTTP `402` with the cumulative amount the payer must sign. See [HTTP API](../gateway/http-api.md#serve).
+The gateway does not serve work the vouchers do not cover. For each `serve` call it computes what the session would owe after the request. If that is more than the value committed in this session, plus the configured `CREDIT_ALLOWANCE` (default `0`), it answers HTTP `402` with the cumulative amount the payer must sign.
 
 ## One session per channel
 
