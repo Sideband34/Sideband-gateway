@@ -1,11 +1,12 @@
-import { APK_RELEASES_URL } from '@/lib/site';
+import { APK_LATEST_URL, APK_RELEASES_URL, APK_SHA256_URL } from '@/lib/site';
 import { BADGE_FILES, type StoreLinks, storeLinksFromEnv } from '@/lib/stores';
 import { IconAndroid, IconApple, IconArrowRight } from './Icons';
 
 /**
  * Download options. Official store badges appear ONLY when a real listing URL is configured at
  * build time (NEXT_PUBLIC_APP_STORE_URL / NEXT_PUBLIC_PLAY_STORE_URL). Without them, Android
- * points to pre-release builds on GitHub Releases and iOS shows a coming-soon state.
+ * downloads the newest APK straight from GitHub Releases (fixed asset name) and iOS shows a
+ * coming-soon state.
  */
 export function Download({ links = storeLinksFromEnv() }: { links?: StoreLinks }) {
   return (
@@ -25,12 +26,30 @@ export function Download({ links = storeLinksFromEnv() }: { links?: StoreLinks }
           <IconAndroid size={28} />
           <h3>Android</h3>
           <p>
-            Pre-release builds are attached to tagged releases on GitHub. Testnet and synthetic
-            providers only; not yet verified on physical devices.
+            Developer preview for Testnet and synthetic providers only. Not yet verified on physical
+            devices; not on Google Play.
           </p>
-          <a className="btn btn-primary" href={APK_RELEASES_URL}>
-            Download for Android (beta APK) <IconArrowRight size={18} />
+          <a className="btn btn-primary" href={APK_LATEST_URL} download>
+            Download for Android <IconArrowRight size={18} />
           </a>
+          <p className="download-links">
+            <a href={APK_RELEASES_URL}>All releases</a> ·{' '}
+            <a href={APK_SHA256_URL}>SHA-256 checksum</a>
+          </p>
+          <details className="apk-help">
+            <summary>How to install an APK</summary>
+            <ol>
+              <li>Open the download on your Android phone.</li>
+              <li>
+                If asked, allow your browser or file manager to <em>install unknown apps</em>{' '}
+                (Settings → Apps → Special access).
+              </li>
+              <li>Tap Install. You can turn the permission off again afterwards.</li>
+              <li>
+                Optional: compare the file&apos;s SHA-256 with the checksum above before installing.
+              </li>
+            </ol>
+          </details>
         </div>
       )}
 

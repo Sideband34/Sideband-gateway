@@ -15,7 +15,7 @@ import { signManifest, type ManifestSigner, type SignedManifest } from './auth/m
 import { UsageMeter, MeterError } from './metering/meter.js';
 import type { NonceStore } from './replay/nonces.js';
 import { runDemo, countWords, MAX_INPUT_CHARS } from './services/demo.js';
-import { SettlementService } from './settlement/service.js';
+import { SettlementService, type SettlementKind } from './settlement/service.js';
 
 export interface GatewayDeps {
   config: GatewayConfig;
@@ -43,6 +43,10 @@ export interface SessionRecord {
   offerExpiresAt: number;
   channelRef?: string;
   maxSpend?: string; // stroops
+  /** Channel cumulative at session start (protocol v2), stroops. */
+  baseline?: string;
+  /** Highest voucher accepted in this session, stroops. */
+  highest?: string;
   units: number;
   seq: number;
 }
@@ -70,6 +74,8 @@ interface Session {
   meter: UsageMeter;
   channelRef?: string;
   maxSpend?: bigint;
+  baseline?: bigint;
+  highest?: bigint;
   binding?: ChannelBinding;
 }
 
@@ -91,8 +97,15 @@ export interface ServiceOfferWire {
 export interface AcceptInput {
   session: string;
   channelRef: string;
+  /** Budget for this session, on top of `baseline`. */
   maxSpend: bigint;
   nonce: string;
+  /**
+   * Channel cumulative the payer believes is already committed (protocol v2
+   * `session_accept.baseline`; absent/0 for a v1 accept on a fresh channel).
+   * Must equal the provider's highest accepted voucher for the channel.
+   */
+  baseline?: bigint;
 }
 
 export class ProviderGateway {
@@ -115,6 +128,8 @@ export class ProviderGateway {
       offerExpiresAt: s.offerExpiresAt,
       ...(s.channelRef ? { channelRef: s.channelRef } : {}),
       ...(s.maxSpend !== undefined ? { maxSpend: s.maxSpend.toString() } : {}),
+      ...(s.baseline !== undefined ? { baseline: s.baseline.toString() } : {}),
+      ...(s.highest !== undefined ? { highest: s.highest.toString() } : {}),
       units: s.meter.units,
       seq: s.meter.seq,
     });
@@ -140,6 +155,8 @@ export class ProviderGateway {
         ...(r.closeReason ? { closeReason: r.closeReason } : {}),
         ...(r.channelRef ? { channelRef: r.channelRef } : {}),
         ...(r.maxSpend !== undefined ? { maxSpend: BigInt(r.maxSpend) } : {}),
+        ...(r.baseline !== undefined ? { baseline: BigInt(r.baseline) } : {}),
+        ...(r.highest !== undefined ? { highest: BigInt(r.highest) } : {}),
       };
       this.sessions.set(s.id, s);
       restored++;
@@ -242,6 +259,9 @@ export class ProviderGateway {
     if (this.d.allowedPayers && !this.d.allowedPayers.has(b.payer)) {
       throw new GatewayError('unauthorized_payer', 'Payer key not authorized');
     }
+    if (b.status === 'closing') {
+      throw new GatewayError('channel_closing', 'Payer started closing this channel');
+    }
     if (b.status !== 'open') throw new GatewayError('channel_not_open', `Channel is ${b.status}`);
     if (b.expiresAt <= this.d.now()) throw new GatewayError('channel_expired', 'Channel expired');
     if (this.d.settlement.isLocked(b.channelId)) {
@@ -251,18 +271,23 @@ export class ProviderGateway {
     if (holder && holder !== s.id && this.sessions.get(holder)?.phase === 'active') {
       throw new GatewayError('channel_in_use', 'Channel already has an active session');
     }
-    // Voucher amounts are cumulative per CHANNEL, so a channel serves one
-    // session: reusing it would let earlier commitments pay for new usage.
-    if (((await this.d.vouchers.get(b.channelId))?.cumulative ?? 0n) > 0n) {
+    // Voucher amounts are cumulative per CHANNEL. Sequential sessions share a
+    // channel by agreeing on the baseline (protocol v2): the payer's baseline
+    // must equal our highest accepted voucher, otherwise earlier commitments
+    // would pay for new usage (lower) or the payer would pay twice (higher).
+    const committed = (await this.d.vouchers.get(b.channelId))?.cumulative ?? 0n;
+    const baseline = a.baseline ?? 0n;
+    if (baseline !== committed) {
       throw new GatewayError(
-        'channel_used',
-        'Channel already carries commitments; open a new channel',
+        'baseline_mismatch',
+        'Session baseline must equal the channel cumulative already committed',
+        { expectedBaseline: formatAmount(committed) },
       );
     }
     const cap = s.meter.pricePerUnit * BigInt(s.meter.maxUnits);
     if (a.maxSpend > cap) throw new GatewayError('spend_exceeds_offer', 'maxSpend above offer cap');
-    if (a.maxSpend > b.deposit) {
-      throw new GatewayError('spend_exceeds_deposit', 'maxSpend above channel deposit');
+    if (baseline + a.maxSpend > b.deposit) {
+      throw new GatewayError('spend_exceeds_deposit', 'baseline + maxSpend above channel deposit');
     }
     if (!this.d.nonces.consume(a.nonce)) {
       throw new GatewayError('replayed_nonce', 'Nonce already used');
@@ -270,6 +295,7 @@ export class ProviderGateway {
     s.phase = 'active';
     s.channelRef = b.channelId;
     s.maxSpend = a.maxSpend;
+    s.baseline = baseline;
     s.binding = b;
     this.activeChannels.set(b.channelId, s.id);
     this.persist(s);
@@ -301,6 +327,7 @@ export class ProviderGateway {
       {
         deposit: s.binding.deposit,
         maxSpend: s.maxSpend,
+        baseline: s.baseline ?? 0n,
         expiresAt: s.binding.expiresAt,
         now: this.d.now,
       },
@@ -308,6 +335,8 @@ export class ProviderGateway {
       v,
     );
     if (!r.ok) throw new GatewayError(r.code, r.detail);
+    s.highest = r.cumulative;
+    this.persist(s);
     return { cumulative: r.cumulative, delta: r.delta, status: 'COMMITMENT_ACCEPTED_NOT_SETTLED' };
   }
 
@@ -325,11 +354,15 @@ export class ProviderGateway {
       if (units === 0) throw new GatewayError('invalid_request', 'empty input');
       if (!s.meter.canRecord(units)) throw new GatewayError('unit_cap', 'Session unit cap reached');
       const newOwed = s.meter.owed + s.meter.pricePerUnit * BigInt(units);
-      const covered = (await this.d.vouchers.get(s.channelRef))?.cumulative ?? 0n;
+      const covered = await this.sessionCommitted(s);
       if (newOwed > covered + this.d.config.creditAllowanceStroops) {
+        // Wire amounts are CHANNEL cumulative (what the payer signs): the
+        // session baseline plus this session's owed / committed value.
+        const base = s.baseline ?? 0n;
         throw new GatewayError('payment_required', 'Voucher does not cover this request', {
-          requiredCumulative: formatAmount(newOwed),
-          currentCumulative: formatAmount(covered),
+          requiredCumulative: formatAmount(base + newOwed),
+          currentCumulative: formatAmount(base + covered),
+          sessionOwed: formatAmount(newOwed),
         });
       }
       const out = runDemo(text);
@@ -362,11 +395,27 @@ export class ProviderGateway {
     };
   }
 
+  /**
+   * Value committed by vouchers in THIS session: channel highest minus the
+   * session baseline. Later sessions on the same channel are sequential, so
+   * while this session is active the channel highest belongs to it.
+   */
+  private async sessionCommitted(s: Session): Promise<bigint> {
+    if (!s.channelRef) return 0n;
+    const highest = (await this.d.vouchers.get(s.channelRef))?.cumulative ?? 0n;
+    const c = highest - (s.baseline ?? 0n);
+    return c > 0n ? c : 0n;
+  }
+
   async usage(sessionId: string) {
     const s = this.session(sessionId);
     const highest = s.channelRef
       ? ((await this.d.vouchers.get(s.channelRef))?.cumulative ?? 0n)
       : 0n;
+    const baseline = s.baseline ?? 0n;
+    // This session's own vouchers only (later sessions build on top).
+    const mine = s.highest ?? (s.phase === 'active' ? highest : baseline);
+    const committed = mine > baseline ? mine - baseline : 0n;
     const owed = s.meter.owed;
     return {
       session: s.id,
@@ -375,8 +424,10 @@ export class ProviderGateway {
       units: s.meter.units,
       seq: s.meter.seq,
       owed: formatAmount(owed),
+      baseline: formatAmount(baseline),
+      sessionCommitted: formatAmount(committed),
       highestVoucher: formatAmount(highest),
-      unpaid: formatAmount(owed > highest ? owed - highest : 0n),
+      unpaid: formatAmount(owed > committed ? owed - committed : 0n),
       settlement: 'NOT_SETTLED' as const,
     };
   }
@@ -395,18 +446,60 @@ export class ProviderGateway {
   async channelStatus(channelId: string) {
     const binding = await this.d.adapter.getBinding(channelId);
     if (!binding) throw new GatewayError('unknown_channel', 'Unknown channel');
-    const highest = await this.d.vouchers.get(channelId);
+    const highest = (await this.d.vouchers.get(channelId))?.cumulative ?? 0n;
     const intent = this.d.settlement.get(channelId);
     return {
       channelId,
       onChainStatus: binding.status,
-      highestVoucher: formatAmount(highest?.cumulative ?? 0n),
-      settlement: intent ? { id: intent.id, state: intent.state } : null,
+      deposit: formatAmount(binding.deposit),
+      withdrawn: formatAmount(binding.withdrawn),
+      highestVoucher: formatAmount(highest),
+      unsettled: formatAmount(highest > binding.withdrawn ? highest - binding.withdrawn : 0n),
+      ...(binding.closeEffectiveAt !== undefined
+        ? { closeEffectiveAt: binding.closeEffectiveAt, disputeWindowOpen: true }
+        : {}),
+      settlement: intent
+        ? {
+            id: intent.id,
+            kind: intent.kind,
+            state: intent.state,
+            // the operator needs the ledger hash and the reason a settlement failed (status is admin-only)
+            ...(intent.txHash ? { txHash: intent.txHash } : {}),
+            ...(intent.failure ? { failure: intent.failure } : {}),
+          }
+        : null,
     };
   }
 
-  async settle(channelId: string): Promise<SettlementIntent> {
-    return this.d.settlement.submit(channelId);
+  /**
+   * Submits a settlement. `settle` (default, `config.settleMode`) withdraws
+   * and keeps the channel open for further sessions; `close` is terminal.
+   */
+  async settle(channelId: string, kind?: SettlementKind): Promise<SettlementIntent> {
+    return this.d.settlement.submit(channelId, kind ?? this.d.config.settleMode);
+  }
+
+  /**
+   * Periodic job for long-running providers. For every channel this gateway
+   * served: if the payer started closing, submit a `close` with the highest
+   * voucher before the dispute window ends; otherwise `settle` once unsettled
+   * value reaches `threshold`. Returns the intents it submitted.
+   */
+  async settleDue(threshold: bigint): Promise<SettlementIntent[]> {
+    const channels = new Set<string>();
+    for (const s of this.sessions.values()) if (s.channelRef) channels.add(s.channelRef);
+    const out: SettlementIntent[] = [];
+    for (const c of channels) {
+      const b = await this.d.adapter.getBinding(c);
+      const highest = (await this.d.vouchers.get(c))?.cumulative ?? 0n;
+      if (!b || highest <= b.withdrawn) continue;
+      if (b.status === 'closing') {
+        out.push(await this.d.settlement.submit(c, 'close'));
+      } else if (b.status === 'open' && highest - b.withdrawn >= threshold) {
+        out.push(await this.d.settlement.submit(c, 'settle'));
+      }
+    }
+    return out;
   }
 
   /**
@@ -425,7 +518,7 @@ export class ProviderGateway {
     for (const c of channels) {
       if (await this.d.vouchers.get(c)) {
         try {
-          intents.push(await this.d.settlement.prepare(c));
+          intents.push(await this.d.settlement.prepare(c, this.d.config.settleMode));
         } catch {
           /* channel no longer settleable; surfaced via channelStatus */
         }

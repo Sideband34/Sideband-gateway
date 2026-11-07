@@ -1,0 +1,79 @@
+{
+  "network": "testnet",
+  "gateway": "http://127.0.0.1:5001",
+  "channelId": "CA7M24HM6TGJIX36E32Q2IBSODMBORSM4GDEDVT6MWVUOGFL7KPVTH2Q",
+  "payer": "GC7ZWRDXDPR6OFB6R72463R6PQQJHOEII5EVEEKOSK5ZQDQRYJSHPHRX",
+  "provider": "GBGVFJ3SDXJMUHW7WDZQSV6GXNU6MVY2BMTK2G6QREAZYW7OI64J75MP",
+  "mode": "autoclose",
+  "requiredCumulative": "0.002",
+  "settlement": {
+    "id": "171df99022e3763215533137cc9b274595c735b65d0d580c48aae54da27bab8c",
+    "kind": "close",
+    "state": "CONFIRMED",
+    "txHash": "6de34d0a046a1dcc4dd88dff03c1b6a6759614f226d511ee227066301a55c884"
+  },
+  "onChainStatus": "closed",
+  "withdrawn": "0.002",
+  "steps": [
+    {
+      "name": "offer received",
+      "detail": {
+        "session": "553cb0d3-2dae-4122-8be1-9f5554be2f87"
+      }
+    },
+    {
+      "name": "accepted; gateway read the channel from Soroban",
+      "detail": {
+        "channelId": "CA7M24HM6TGJIX36E32Q2IBSODMBORSM4GDEDVT6MWVUOGFL7KPVTH2Q"
+      }
+    },
+    {
+      "name": "402 payment_required",
+      "detail": {
+        "requiredCumulative": "0.002"
+      }
+    },
+    {
+      "name": "voucher accepted, honestly NOT settled",
+      "detail": {
+        "status": "COMMITMENT_ACCEPTED_NOT_SETTLED"
+      }
+    },
+    {
+      "name": "replayed voucher refused (409)"
+    },
+    {
+      "name": "paid request served",
+      "detail": {
+        "units": 2
+      }
+    },
+    {
+      "name": "usage",
+      "detail": {
+        "units": 2,
+        "owed": "0.002",
+        "settlement": "NOT_SETTLED"
+      }
+    },
+    {
+      "name": "payer started a close on-chain",
+      "detail": {
+        "closeStartTx": "5a47ad162f763d9f8ad3d1d93966737def5fa1eb6d90cd2965f0a0bb5c7ce651"
+      }
+    },
+    {
+      "name": "gateway answered the payer close with the highest voucher",
+      "detail": {
+        "withdrawn": "0.002"
+      }
+    }
+  ],
+  "at": "2026-11-04T18:35:13.124Z",
+  "settlementAtPollTime": {
+    "id": "171df99022e3763215533137cc9b274595c735b65d0d580c48aae54da27bab8c",
+    "kind": "close",
+    "state": "AUTHORIZED"
+  },
+  "note": "settlement re-read from GET /v1/channels/{id}/status after the poll returned (the intent was AUTHORIZED when the withdrawal first became visible); txHash verified successful on Horizon."
+}

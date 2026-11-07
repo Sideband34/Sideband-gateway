@@ -8,7 +8,16 @@ import {
 } from '@sideband/channels';
 import { GatewayError, type GatewayErrorCode } from '../src/errors.js';
 import { SubmissionTimeoutError } from '../src/settlement/service.js';
-import { S, activeSession, harness, payerKp, providerKp, strangerKp } from './helpers.js';
+import {
+  S,
+  activeSession,
+  harness,
+  payerKp,
+  providerKp,
+  strangerKp,
+  type Harness,
+} from './helpers.js';
+import { InMemorySessionStore, ProviderGateway } from '../src/gateway.js';
 import { buildPreimage, createVoucher, keypairSigner } from '@sideband/channels';
 
 async function code(p: Promise<unknown> | (() => unknown)): Promise<GatewayErrorCode | 'no_error'> {
@@ -212,23 +221,178 @@ describe('session setup', () => {
   });
 });
 
-describe('channel reuse', () => {
-  it('refuses a new session on a channel that already carries commitments (no free reuse)', async () => {
+describe('channel reuse (protocol v2 baseline)', () => {
+  async function firstSessionSpent(amount = '0.01') {
     const h = await harness();
+    const id = await activeSession(h);
+    await h.gw.submitVoucher(id, h.voucher(amount));
+    h.gw.closeSession(id);
+    return { h, id };
+  }
+  const accept = (h: Harness, session: string, baseline?: string, maxSpend = S) =>
+    h.gw.acceptSession({
+      session,
+      channelRef: h.channelId,
+      maxSpend,
+      nonce: h.nonce(),
+      ...(baseline !== undefined ? { baseline: parseAmount(baseline) } : {}),
+    });
+
+  it('refuses a v1 (zero-baseline) accept on a channel that already carries commitments', async () => {
+    const { h } = await firstSessionSpent();
+    const o = h.gw.createOffer();
+    const e = await accept(h, o.session).catch((x: GatewayError) => x);
+    expect(e).toMatchObject({ code: 'baseline_mismatch', extra: { expectedBaseline: '0.01' } });
+  });
+
+  it('refuses a baseline above or below the committed amount', async () => {
+    const { h } = await firstSessionSpent();
+    for (const b of ['0.009', '0.011']) {
+      const o = h.gw.createOffer();
+      expect(await code(accept(h, o.session, b))).toBe('baseline_mismatch');
+    }
+  });
+
+  it('runs a second session on the same channel with its own budget and meter', async () => {
+    const { h, id: first } = await firstSessionSpent('0.01');
+    const o = h.gw.createOffer();
+    await accept(h, o.session, '0.01', parseAmount('0.005'));
+    const id = o.session;
+    // Old commitments do not pay for new usage; the 402 names the channel
+    // cumulative to sign (baseline + session owed).
+    const e402 = await h.gw.serve(id, 'a b c').catch((x: GatewayError) => x);
+    expect(e402).toMatchObject({
+      code: 'payment_required',
+      extra: { requiredCumulative: '0.013', currentCumulative: '0.01', sessionOwed: '0.003' },
+    });
+    await h.gw.submitVoucher(id, h.voucher('0.013'));
+    expect(await h.gw.serve(id, 'a b c')).toMatchObject({ units: 3, owed: '0.003' });
+    expect(await h.gw.usage(id)).toMatchObject({
+      baseline: '0.01',
+      sessionCommitted: '0.003',
+      highestVoucher: '0.013',
+      unpaid: '0',
+    });
+    // Session budget is measured from the baseline: 0.01 + 0.005.
+    expect(await code(h.gw.submitVoucher(id, h.voucher('0.0150001')))).toBe('over_budget');
+    expect((await h.gw.submitVoucher(id, h.voucher('0.015'))).delta).toBe(parseAmount('0.002'));
+    // Vouchers at or below the baseline are not new value.
+    expect(await code(h.gw.submitVoucher(id, h.voucher('0.01')))).toBe('non_monotonic');
+    // The first session's view stays capped at what it committed.
+    expect(await h.gw.usage(first)).toMatchObject({ baseline: '0', sessionCommitted: '0.01' });
+  });
+
+  it('still allows only one active session per channel', async () => {
+    const h = await harness();
+    await activeSession(h);
+    const o = h.gw.createOffer();
+    expect(await code(accept(h, o.session))).toBe('channel_in_use');
+  });
+
+  it('checks baseline + maxSpend against the deposit', async () => {
+    const h = await harness({ deposit: parseAmount('0.02') });
+    const id = await activeSession(h, '0.015');
+    await h.gw.submitVoucher(id, h.voucher('0.015'));
+    h.gw.closeSession(id);
+    const o = h.gw.createOffer();
+    expect(await code(accept(h, o.session, '0.015', parseAmount('0.006')))).toBe(
+      'spend_exceeds_deposit',
+    );
+    await accept(h, h.gw.createOffer().session, '0.015', parseAmount('0.005'));
+  });
+
+  it('refuses new sessions once the payer started closing the channel', async () => {
+    const h = await harness();
+    await h.adapter.closeStart(h.channelId);
+    expect(await code(accept(h, h.gw.createOffer().session))).toBe('channel_closing');
+  });
+
+  it('restores the session baseline after a restart', async () => {
+    const sessions = new InMemorySessionStore();
+    const h = await harness({ sessions });
     const id = await activeSession(h);
     await h.gw.submitVoucher(id, h.voucher('0.01'));
     h.gw.closeSession(id);
     const o = h.gw.createOffer();
-    expect(
-      await code(
-        h.gw.acceptSession({
-          session: o.session,
-          channelRef: h.channelId,
-          maxSpend: S,
-          nonce: 'again',
-        }),
-      ),
-    ).toBe('channel_used');
+    await accept(h, o.session, '0.01');
+    const gw2 = new ProviderGateway({ ...h.deps, sessions });
+    await gw2.restore();
+    expect(await gw2.usage(o.session)).toMatchObject({ baseline: '0.01', phase: 'active' });
+  });
+});
+
+describe('long-running provider settlement (settle keeps the channel open)', () => {
+  it('settle withdraws, keeps the channel open, and a later session settles the rest', async () => {
+    const h = await harness();
+    const id = await activeSession(h);
+    await h.gw.submitVoucher(id, h.voucher('0.004'));
+    const i1 = await h.gw.settle(h.channelId); // default SETTLE_MODE=settle
+    expect(i1).toMatchObject({ kind: 'settle', state: 'SUBMITTED', amount: parseAmount('0.004') });
+    expect(i1.txHash).toMatch(/^synthetic:settle:/);
+    const b = (await h.adapter.getBinding(h.channelId))!;
+    expect(b).toMatchObject({ status: 'open', withdrawn: parseAmount('0.004') });
+    // Not locked: the same session keeps paying.
+    await h.gw.submitVoucher(id, h.voucher('0.006'));
+    expect(await code(h.gw.settle(h.channelId, 'settle'))).not.toBe('nothing_to_settle');
+    const st = await h.gw.channelStatus(h.channelId);
+    expect(st).toMatchObject({ withdrawn: '0.006', unsettled: '0', onChainStatus: 'open' });
+    expect(await code(h.gw.settle(h.channelId, 'settle'))).toBe('nothing_to_settle');
+    // Close at the end refunds the remainder.
+    const c = await h.gw.settle(h.channelId, 'close');
+    expect(c).toMatchObject({ kind: 'close', state: 'SUBMITTED' });
+    expect((await h.adapter.getBinding(h.channelId))?.refundedToPayer).toBe(
+      10n * S - parseAmount('0.006'),
+    );
+    expect(await code(h.gw.submitVoucher(id, h.voucher('0.007')))).toBe('channel_settling');
+  });
+
+  it('SETTLE_MODE=close makes close the default', async () => {
+    const h = await harness({ env: { SETTLE_MODE: 'close' } });
+    const id = await activeSession(h);
+    await h.gw.submitVoucher(id, h.voucher('0.004'));
+    expect((await h.gw.settle(h.channelId)).kind).toBe('close');
+  });
+
+  it('settleDue settles above the threshold and disputes a payer close with the highest voucher', async () => {
+    const h = await harness();
+    const id = await activeSession(h);
+    await h.gw.submitVoucher(id, h.voucher('0.002'));
+    expect(await h.gw.settleDue(parseAmount('0.005'))).toHaveLength(0);
+    await h.gw.submitVoucher(id, h.voucher('0.005'));
+    const [s1] = await h.gw.settleDue(parseAmount('0.005'));
+    expect(s1).toMatchObject({ kind: 'settle', amount: parseAmount('0.005') });
+    expect(await h.gw.settleDue(parseAmount('0.005'))).toHaveLength(0); // nothing new
+
+    await h.gw.submitVoucher(id, h.voucher('0.006'));
+    const { closeEffectiveAt } = await h.adapter.closeStart(h.channelId);
+    expect((await h.gw.channelStatus(h.channelId)).disputeWindowOpen).toBe(true);
+    // Below threshold, but the payer is closing: submit the highest now.
+    const [d] = await h.gw.settleDue(parseAmount('1'));
+    expect(d).toMatchObject({ kind: 'close', amount: parseAmount('0.006') });
+    h.clock.t = closeEffectiveAt;
+    await expect(h.adapter.refund(h.channelId)).rejects.toMatchObject({ code: 'already_settled' });
+    expect((await h.adapter.getBinding(h.channelId))?.settledToProvider).toBe(parseAmount('0.006'));
+  });
+
+  it('an in-flight settle is not resubmitted until it resolves', async () => {
+    let settles = 0;
+    const h = await harness({
+      adapter: (now) =>
+        new (class extends InMemoryChannelAdapter {
+          override async settle(): Promise<never> {
+            settles++;
+            throw new SubmissionTimeoutError('tx-settle-1');
+          }
+        })(now),
+    });
+    const id = await activeSession(h);
+    await h.gw.submitVoucher(id, h.voucher('0.004'));
+    expect((await h.gw.settle(h.channelId)).state).toBe('RECONCILING');
+    await h.gw.submitVoucher(id, h.voucher('0.005'));
+    expect((await h.gw.settle(h.channelId)).txHash).toBe('tx-settle-1');
+    expect(settles).toBe(1);
+    // A RECONCILING settle does not lock vouchers (the channel stays open).
+    await h.gw.submitVoucher(id, h.voucher('0.006'));
   });
 });
 
@@ -391,18 +555,18 @@ describe('settlement preparation', () => {
 
   it('submits the highest voucher and stays SUBMITTED (synthetic adapter has no finality)', async () => {
     const { h } = await paidSession();
-    const i = await h.gw.settle(h.channelId);
+    const i = await h.gw.settle(h.channelId, 'close');
     expect(i).toMatchObject({ state: 'SUBMITTED', amount: parseAmount('0.004') });
     expect(i.txHash).toMatch(/^synthetic:close:/);
     expect((await h.adapter.getBinding(h.channelId))?.settledToProvider).toBe(parseAmount('0.004'));
     // idempotent: same intent again, no second close
-    expect((await h.gw.settle(h.channelId)).id).toBe(i.id);
+    expect((await h.gw.settle(h.channelId, 'close')).id).toBe(i.id);
     expect((await h.gw.channelStatus(h.channelId)).settlement?.state).toBe('SUBMITTED');
   });
 
   it('only CONFIRMS with matching finality evidence', async () => {
     const { h } = await paidSession();
-    const i = await h.gw.settle(h.channelId);
+    const i = await h.gw.settle(h.channelId, 'close');
     const bad = () =>
       h.settlement.confirm(h.channelId, {
         network: NETWORK_PASSPHRASES.futurenet,
@@ -421,7 +585,7 @@ describe('settlement preparation', () => {
 
   it('locks the amount once settling: later vouchers are refused', async () => {
     const { h, id } = await paidSession();
-    await h.gw.settle(h.channelId);
+    await h.gw.settle(h.channelId, 'close');
     expect(await code(h.gw.submitVoucher(id, h.voucher('0.9')))).toBe('channel_settling');
   });
 
@@ -438,9 +602,9 @@ describe('settlement preparation', () => {
     });
     const id = await activeSession(h);
     await h.gw.submitVoucher(id, h.voucher('0.1'));
-    const i = await h.gw.settle(h.channelId);
+    const i = await h.gw.settle(h.channelId, 'close');
     expect(i).toMatchObject({ state: 'RECONCILING', txHash: 'tx-hash-1' });
-    await h.gw.settle(h.channelId);
+    await h.gw.settle(h.channelId, 'close');
     expect(closes).toBe(1);
     expect(
       h.settlement.confirm(h.channelId, {
@@ -455,9 +619,10 @@ describe('settlement preparation', () => {
     const h = await harness({ channelExpiresAt: 2_000 });
     const id = await activeSession(h);
     await h.gw.submitVoucher(id, h.voucher('0.1'));
-    h.clock.t = 2_000;
+    await h.adapter.closeStart(h.channelId);
+    h.clock.t = 2_000 + 3_600;
     await h.adapter.refund(h.channelId);
-    expect(await code(h.gw.settle(h.channelId))).toBe('channel_not_open');
+    expect(await code(h.gw.settle(h.channelId, 'close'))).toBe('channel_not_open');
     expect((await h.gw.channelStatus(h.channelId)).onChainStatus).toBe('refunded');
   });
 
@@ -472,14 +637,14 @@ describe('settlement preparation', () => {
     });
     const id = await activeSession(h);
     await h.gw.submitVoucher(id, h.voucher('0.1'));
-    const i = await h.gw.settle(h.channelId);
+    const i = await h.gw.settle(h.channelId, 'close');
     expect(i.state).toBe('FAILED');
     expect(i.failure).toMatch(/already_settled/);
   });
 
   it('refuses to settle without a voucher or for an unknown channel', async () => {
     const h = await harness();
-    expect(await code(h.gw.settle(h.channelId))).toBe('bad_state');
+    expect(await code(h.gw.settle(h.channelId, 'close'))).toBe('bad_state');
     expect(await code(h.gw.settle('C' + 'A'.repeat(55)))).toBe('unknown_channel');
   });
 });
@@ -498,7 +663,7 @@ describe('provider shutdown', () => {
     expect(await code(h.gw.serve(id, 'x'))).toBe('shutting_down');
     expect(await code(h.gw.submitVoucher(id, h.voucher('0.06')))).toBe('bad_state');
     // the prepared intent can still be submitted after shutdown
-    expect((await h.gw.settle(h.channelId)).state).toBe('SUBMITTED');
+    expect((await h.gw.settle(h.channelId, 'close')).state).toBe('SUBMITTED');
   });
 });
 
@@ -516,6 +681,8 @@ describe('Soroban-backed settlement path (fake chain client)', () => {
       xdr.ScVal.scvMap(
         (
           [
+            ['close_effective_at', nativeToScVal(0n, { type: 'u64' })],
+            ['close_wait', nativeToScVal(3600n, { type: 'u64' })],
             ['deposit', nativeToScVal(10n * S, { type: 'i128' })],
             ['expires_at', nativeToScVal(100_000n, { type: 'u64' })],
             ['paid_to_provider', nativeToScVal(paid, { type: 'i128' })],
@@ -535,10 +702,13 @@ describe('Soroban-backed settlement path (fake chain client)', () => {
       readChannel: async () => state,
       deploy: async () => channel,
       getTransaction: async (h: string) => txs.get(h) ?? { status: 'NOT_FOUND' as const },
-      invoke: async () => {
+      invoke: async (a: { method: string }) => {
         if (mode === 'timeout') throw new Timeout('hash-t');
-        state = scv('Closed', parseAmount('0.004'), 10n * S - parseAmount('0.004'));
-        return { hash: 'hash-ok', status: 'SUCCESS' as const, ledger: 77 };
+        state =
+          a.method === 'settle'
+            ? scv('Open', parseAmount('0.004'))
+            : scv('Closed', parseAmount('0.004'), 10n * S - parseAmount('0.004'));
+        return { hash: `hash-${a.method}`, status: 'SUCCESS' as const, ledger: 77 };
       },
     };
     const adapter = new SorobanChannelAdapter({
@@ -561,15 +731,23 @@ describe('Soroban-backed settlement path (fake chain client)', () => {
     const v = createVoucher(keypairSigner(payerKp), domain, parseAmount('0.004'));
     await vouchers.compareAndSet(channel, 0n, { cumulative: parseAmount('0.004'), voucher: v });
 
-    const done = await svc.submit(channel);
-    expect(done).toMatchObject({ state: 'CONFIRMED', txHash: 'hash-ok' });
+    const done = await svc.submit(channel, 'close');
+    expect(done).toMatchObject({ state: 'CONFIRMED', txHash: 'hash-close' });
     expect(done.evidence).toMatchObject({ ledger: 77, network: N.testnet });
+
+    // settle path: confirmed with evidence, channel stays open
+    state = scv('Open');
+    const svcS = new SettlementService(adapter, vouchers);
+    const st = await svcS.submit(channel, 'settle');
+    expect(st).toMatchObject({ kind: 'settle', state: 'CONFIRMED', txHash: 'hash-settle' });
+    expect(svcS.isLocked(channel)).toBe(false);
+    expect((await adapter.getBinding(channel))?.status).toBe('open');
 
     // timeout path on a fresh channel state
     state = scv('Open');
     mode = 'timeout';
     const svc2 = new SettlementService(adapter, vouchers);
-    const rec = await svc2.submit(channel);
+    const rec = await svc2.submit(channel, 'close');
     expect(rec).toMatchObject({ state: 'RECONCILING', txHash: 'hash-t' });
     expect((await svc2.reconcile(channel)).state).toBe('RECONCILING'); // NOT_FOUND != failed
     txs.set('hash-t', { status: 'SUCCESS', ledger: 91 });
@@ -578,7 +756,7 @@ describe('Soroban-backed settlement path (fake chain client)', () => {
     expect(fin.evidence?.ledger).toBe(91);
 
     const svc3 = new SettlementService(adapter, vouchers);
-    await svc3.submit(channel);
+    await svc3.submit(channel, 'close');
     txs.set('hash-t', { status: 'FAILED', ledger: 92 });
     expect((await svc3.reconcile(channel)).state).toBe('FAILED');
   });
