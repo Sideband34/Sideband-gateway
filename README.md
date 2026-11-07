@@ -12,8 +12,10 @@ Part of [Sideband](#how-sideband-works): nearby services, metered value, Stellar
 [![License: MIT](https://img.shields.io/badge/license-MIT-FF8B24.svg)](./LICENSE)
 [![Status: pre-release](https://img.shields.io/badge/status-pre--release-130B12.svg)](#status)
 [![Network: Stellar Testnet only](https://img.shields.io/badge/network-Stellar%20Testnet%20only-130B12.svg)](./SECURITY.md)
+[![Docs](https://img.shields.io/badge/docs-GitBook%20source-FF8B24.svg)](https://github.com/Sideband34/Sideband-gateway/blob/main/gitbook/README.md)
+[![Stellar Wave](https://img.shields.io/badge/Drips-Stellar%20Wave-130B12.svg)](https://github.com/Sideband34/Sideband-gateway/issues?q=is%3Aissue+is%3Aopen+label%3A%22Stellar+Wave%22)
 
-[How it works](#how-sideband-works) · [Quickstart](#quickstart) · [Status](#status) · [Architecture](#architecture) · [Contributing](#contributing) · [Security](#security)
+[Docs](https://github.com/Sideband34/Sideband-gateway/blob/main/gitbook/README.md) · [Live site](https://sideband-web1.vercel.app) · [Quick start](#quick-start) · [Status](#status) · [Architecture](#how-it-fits-together) · [Contributing](#contributing) · [Security](#security)
 
 </div>
 
@@ -21,10 +23,11 @@ Part of [Sideband](#how-sideband-works): nearby services, metered value, Stellar
 > Pre-release software for **Stellar Testnet and synthetic assets only**. The channel contract and
 > voucher format are **unaudited**. Do not use with real funds.
 
-## What this repository is
+## What this is
 
-The software a **provider** runs to sell a metered service to nearby phones, plus the Sideband
-landing site in [`apps/landing`](./apps/landing).
+Sideband-gateway is the software a provider runs to sell a metered service to nearby phones: it offers a price, serves the work only when it is paid for (HTTP 402 otherwise), checks every voucher, and prepares settlement on Stellar. The repository also contains the Sideband landing site.
+
+What is inside:
 
 - **Session API** (`src/gateway.ts`, `src/http`): versioned v1 HTTP API
   ([OpenAPI](./docs/openapi.yaml)): session offer/accept with funded-channel binding, network and
@@ -64,7 +67,7 @@ partner claims):
 
 Android download at 360 px: [direct latest-APK button, all releases, install help](./docs/screenshots/landing-download-mobile-light.png).
 
-## Quickstart
+## Quick start
 
 Requires Node 22.13+. The channels SDK is a `file:` dependency on a sibling checkout.
 
@@ -111,7 +114,7 @@ The site never shows store links unless real listings are configured; see
 | Durable settlement intents (SQLite via `DB_PATH`) | Implemented and unit-tested across a simulated restart; **not yet re-verified live after a real process restart** |
 | Multi-instance rate limiting, TLS, key rotation, metrics | Not implemented |
 | Landing site | Implemented: static export, animated explainers, direct latest-APK download; 36 tests |
-| Hosted deployment of the site | None yet |
+| Hosted deployment | Landing on Vercel ([sideband-web1.vercel.app](https://sideband-web1.vercel.app)). Demo gateway on Render, free plan, synthetic test adapter ([health](https://sideband-gateway.onrender.com/v1/health)); the live adapter is not enabled there because it needs a provider key only the operator may set |
 
 ### Compatibility
 
@@ -140,7 +143,7 @@ the session:
 A voucher is a commitment against already-locked funds, **not** a completed payment. Nothing is
 shown as settled until Stellar confirms it.
 
-## Architecture
+## How it fits together
 
 Four repositories, one responsibility each. No payment signing lives in transport code, and no
 chain logic lives in the app. This repository is highlighted.
@@ -177,30 +180,55 @@ Cross-repo contracts are pinned with fixtures: voucher golden vectors from `Side
 and a synthetic session transcript from `Sideband-gateway`. See
 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for data and ownership paths.
 
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Provider runtime | TypeScript 5.9, Node 22.13 or newer, Zod 4, SQLite, `@sideband/channels` |
+| Landing site | Next.js 16, React 19, static export |
+| Tests | Vitest 5 for both the gateway and the site, ESLint, Prettier |
+| Hosting | Vercel (site) and Render free plan (demo gateway) |
+
+## Project structure
+
+```
+src/                 gateway, HTTP API, auth, metering, replay stores, settlement, config
+apps/landing/        Next.js landing site (static export)
+fixtures/            synthetic session transcript that the sibling repos test against
+scripts/             session and fixture drivers
+docs/                architecture, threat model, deployment, OpenAPI file, screenshots
+```
+
 ## Contributing
 
-Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md) for the local checks and
-workflow, and pick from the scoped work in
-[docs/CONTRIBUTOR_ISSUES.md](./docs/CONTRIBUTOR_ISSUES.md): each item lists its interfaces,
-acceptance tests and size. Please follow the [Code of Conduct](./CODE_OF_CONDUCT.md).
+Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md) for the local checks and the workflow, then pick an open issue labelled
+[`Stellar Wave`](https://github.com/Sideband34/Sideband-gateway/issues?q=is%3Aissue+is%3Aopen+label%3A%22Stellar+Wave%22). Each issue lists context, scope, implementation notes and
+acceptance criteria, and carries a `trivial`, `medium` or `high` complexity label. New here? Try [`good first issue`](https://github.com/Sideband34/Sideband-gateway/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+Please follow the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
-**Drips Wave.** Sideband intends to participate in
-[Drips Wave](https://docs.drips.network/wave/maintainers/participating-in-a-wave/) on Stellar.
-Participation and rewards depend on organizer approval and are not guaranteed. Wave issues are
-real, scoped work in this repository's boundary, never filler.
+**Drips Wave.** Sideband applies to [Drips Wave](https://docs.drips.network/wave) on Stellar. Acceptance and rewards depend on the organizers and are not guaranteed.
 
 ## Security
 
-Please report vulnerabilities privately; see [SECURITY.md](./SECURITY.md). The threat model is
-in [docs/SECURITY.md](./docs/SECURITY.md). Never post keys or seeds in issues, even Testnet ones.
+Report vulnerabilities privately, as described in [SECURITY.md](./SECURITY.md). The threat model and what is not covered are in [docs/SECURITY.md](./docs/SECURITY.md).
+This is a Testnet prototype and has not been audited. Never post keys or seeds in an issue, even Testnet ones.
 
-## Project documents
+## Community
 
-[PRD](./docs/PRD.md) · [Requirements](./docs/SRD.md) · [Architecture](./docs/ARCHITECTURE.md) ·
-[Stellar protocol](./docs/STELLAR_PROTOCOL.md) · [Roadmap](./docs/ROADMAP.md) ·
-[Brand](./docs/BRAND.md) · [Agent rules](./AGENTS.md)
+Questions and ideas: [GitHub Discussions](https://github.com/Sideband34/Sideband-gateway/discussions).
+<!-- Owner: add the community invite link (Telegram or Discord) on this line when it exists. -->
 
-The approved logo is in [`brand/`](./brand) and shared by all four repositories.
+## Maintainers
+
+| Maintainer | Role | Contact |
+|---|---|---|
+| [Cjay-Cyber-2](https://github.com/Cjay-Cyber-2) | Maintainer | GitHub [issues](https://github.com/Sideband34/Sideband-gateway/issues) and [Discussions](https://github.com/Sideband34/Sideband-gateway/discussions) |
+
+## Contributors
+
+<a href="https://github.com/Sideband34/Sideband-gateway/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Sideband34/Sideband-gateway" alt="Contributors" />
+</a>
 
 ## License
 

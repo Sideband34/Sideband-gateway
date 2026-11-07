@@ -1,37 +1,61 @@
-# Sideband — Environment, Deployment and Recovery
+# Deploying Sideband-gateway
+
+The gateway is a TypeScript service (HTTP 402 flow, sessions, anti-replay voucher validation, settlement). The landing site is a Next.js app in `apps/landing`. Everything is **Testnet and synthetic only**.
 
 ## Environment boundaries
-- Local: deterministic Docker Compose services, Stellar local network/Testnet, synthetic users/fixtures.
-- Staging: separate database, bucket, API credentials, signing identities, Testnet assets/contracts, observability.
-- Production: requires security audit, real issuer/provider agreements and relevant jurisdictional legal/compliance review. Not included in preimplementation scaffold.
 
-## Suggested variables (non-secret examples only)
-```dotenv
-APP_ENV=development
-STELLAR_NETWORK=testnet
-STELLAR_RPC_URL=https://soroban-testnet.stellar.org
-HORIZON_URL=https://horizon-testnet.stellar.org
-DATABASE_URL=postgresql://localhost:5432/sideband
-REDIS_URL=redis://localhost:6379
-API_BASE_URL=http://localhost:3001
-CHAIN_START_LEDGER=0
-LOG_LEVEL=info
+| Environment | What runs |
+|---|---|
+| Local | `npm start` with the default synthetic test adapter, or `ADAPTER=soroban` against Testnet |
+| Hosted demo | Landing on Vercel, gateway on Render (free plan, test adapter) |
+| Production | Not available. It needs an audit, a managed provider key and a legal review. |
+
+## Environment variables
+
+All optional unless marked. Values shown are the examples in `.env.example`.
+
+| Variable | Example | Purpose |
+|---|---|---|
+| `PORT`, `HOST` | `3001`, `127.0.0.1` | Listen address. Set `HOST=0.0.0.0` on a host that routes traffic in (Render does set `PORT`) |
+| `STELLAR_NETWORK` | `testnet` | `testnet`, `standalone`, `sandbox` or `futurenet`. The public network is refused |
+| `ADAPTER` | unset | Unset runs the synthetic test adapter. `soroban` uses a real channel |
+| `SESSION_SECRET` | random | Signs session tokens. Generate your own, 32 or more characters. **Required** |
+| `ADMIN_TOKEN` | unset | Enables the settle and status endpoints. Unset disables them |
+| `DB_PATH` | `:memory:` | SQLite file for vouchers, nonces, sessions and settlement intents. The directory is created |
+| `SERVICE_ID`, `UNIT`, `CURRENCY` | | Manifest fields of the demo service |
+| `PRICE_PER_UNIT`, `MAX_SESSION_UNITS`, `CREDIT_ALLOWANCE` | `0.001`, `1000`, `0` | Price and caps |
+| `SETTLE_MODE` | `settle` | `settle` withdraws and keeps the channel open. `close` is terminal |
+| `AUTO_SETTLE_AMOUNT`, `AUTO_SETTLE_INTERVAL_SEC` | `0`, `60` | Settle automatically once unsettled value reaches the amount. This also answers a payer `close_start` |
+| `RATE_LIMIT_BURST`, `RATE_LIMIT_PER_SEC` | `60`, `20` | Request limiter |
+| `DEV_PAYER_PUBLIC_KEY` | unset | Opens one synthetic channel in the test adapter |
+| `SOROBAN_RPC_URL` | `https://soroban-testnet.stellar.org` | Read by the live adapter. The name is not `STELLAR_RPC_URL` |
+| `CHANNEL_WASM_HASH` | | Hash of the uploaded channel wasm (live adapter) |
+| `PROVIDER_SECRET` | | Testnet provider secret for the live adapter. Set it only in your own host settings or an untracked `.env`. Never commit it |
+
+## Hosted demo
+
+| Part | Where | Notes |
+|---|---|---|
+| Landing | Vercel, project root `apps/landing`, https://sideband-web1.vercel.app | Optional store badge variables stay unset until a listing exists |
+| Gateway | Render web service, free plan, https://sideband-gateway.onrender.com | Synthetic test adapter. Health route `/v1/health`. The signed manifest is at `/.well-known/sideband-service.json` |
+
+Render build command. The gateway depends on the sibling package `file:../Sideband-channels`, so the build clones it, builds it, and copies the built package into `node_modules`:
+
+```bash
+git clone --depth 1 https://github.com/Sideband34/Sideband-channels ../Sideband-channels && (cd ../Sideband-channels && npm ci --include=dev) && npm ci --include=dev && rm -rf node_modules/@sideband/channels && mkdir -p node_modules/@sideband/channels && cp -r ../Sideband-channels/dist ../Sideband-channels/fixtures ../Sideband-channels/package.json node_modules/@sideband/channels/
 ```
-- Credentials to sign on-chain go into a secure secret manager or hardware-backed user wallet, never into a public mobile/web bundle.
-- Signed store badge links are configured after actual publication; no fabricated App Store or Google Play app URLs.
 
-## CI & GitHub setup
-- GitHub Actions per repo: formatting/lint, schema checks, unit tests, dependency scanning; chain/devices smoke tests where supported.
-- Branch protection and PR review recommended.
-- Release tag points to tested sibling versions in an integration lockfile.
-- All paths use offline/synthetic test fixtures, not real user financial records.
+Start command: `npm start`. Environment: `APP_ENV=development`, `STELLAR_NETWORK=testnet`, `HOST=0.0.0.0`, and a generated `SESSION_SECRET`.
 
-## Failure recovery
-- Rebuild indexers from ledger cursor; compare DB projection vs chain truth.
-- Restore DB backups after verifying transaction-intent reconciliation.
-- Never republish user transactions solely because a client request timed out.
-- Test signing-key rotation, dependency outages, stale quotes, malicious user input, insufficient balances and duplicate delivery.
-- External reference infrastructure may change; check upstream project versions and licenses at build time.
+Free-plan limits: the instance sleeps when idle (the first request after a pause can take 50 seconds or more), there is no disk (leave `DB_PATH` unset, so state is in memory and lost on restart), and the
+build re-clones `Sideband-channels` from `main` each time, so an incompatible change there can break a later build. The hosted gateway does **not** run the live adapter, because that needs a provider secret key
+that only the operator may set.
+
+## Recovery
+
+- Settlement intents are persisted in SQLite when `DB_PATH` is a file, so a restart does not forget an in-flight or confirmed settlement. This is covered by unit tests across a simulated restart, and was not re-verified by restarting the live gateway.
+- Never republish a settlement because a request timed out: read the ledger first.
+- Rotate `SESSION_SECRET` to invalidate all session tokens.
 
 ## Live run against Testnet channels (2026-11-04)
 

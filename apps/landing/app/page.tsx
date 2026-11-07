@@ -609,7 +609,7 @@ export default function Home() {
               </a>
               <a
                 className="btn btn-ghost"
-                href={repoFile('Sideband-gateway', 'docs/CONTRIBUTOR_ISSUES.md')}
+                href={`${GITHUB_ORG}/Sideband-gateway/issues?q=is%3Aissue+is%3Aopen+label%3A%22Stellar+Wave%22`}
               >
                 Open work
               </a>
