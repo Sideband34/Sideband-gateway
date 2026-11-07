@@ -73,7 +73,7 @@ Because the channel address is inside the bytes, a voucher is valid for one chan
 
 ## A worked run
 
-This output comes from the SDK example on [Worked example](../sdk/worked-example.md). The channel deposit is `1`, session 1 has `maxSpend` `0.5` and baseline `0`.
+This output comes from the SDK example. The channel deposit is `1`, session 1 has `maxSpend` `0.5` and baseline `0`.
 
 | Voucher | Result |
 | --- | --- |

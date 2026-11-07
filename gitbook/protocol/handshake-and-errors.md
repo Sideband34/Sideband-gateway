@@ -49,7 +49,7 @@ Calling a method in the wrong phase gives `bad_state`.
 | `over_budget` | Voucher above `baseline + maxSpend`. |
 | `non_monotonic` | Voucher not above the highest so far. |
 
-The payer app adds `wrong_provider`, `channel_expired` and `channel_exhausted` (the deposit is already fully committed, so the channel needs a top-up). The gateway has more codes, covered on [Gateway errors](../gateway/errors.md).
+The payer app adds `wrong_provider`, `channel_expired` and `channel_exhausted` (the deposit is already fully committed, so the channel needs a top-up). The gateway exposes its own HTTP error bodies from the handlers in [its source](https://github.com/Sideband34/Sideband-gateway/tree/main/src/http).
 
 ## Voucher checks are structural here
 

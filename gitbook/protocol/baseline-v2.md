@@ -24,7 +24,7 @@ Protocol v2 adds one field to `session_accept`: `baseline`, the channel's cumula
 
 ## Worked example
 
-Real output from the gateway on the test adapter (see [HTTP API](../gateway/http-api.md)). Price `0.001` per word.
+Real output from the gateway on the test adapter. Price `0.001` per word.
 
 **Session 1.** The payer accepts with `v: 1`. A request for two words returns `402` asking for cumulative `0.002`. The payer sends that voucher. The provider's highest is now `0.002`.
 
@@ -57,4 +57,4 @@ A `session_accept` with `baseline == 0` is still encoded as v1 and is byte-ident
 
 ## What the payer stores
 
-The payer app records the highest amount it has ever signed per channel (the *signed ledger*). That value is the baseline it offers in the next session. If the provider's record is lower than what the payer signed, for example after a crash that lost a voucher in transit, the app raises `BaselineGap` and signs nothing until the user decides. See [Keys, ledger and journal](../mobile/keys-ledger-journal.md).
+The payer app records the highest amount it has ever signed per channel (the *signed ledger*). That value is the baseline it offers in the next session. If the provider's record is lower than what the payer signed, for example after a crash that lost a voucher in transit, the app raises `BaselineGap` and signs nothing until the user decides.

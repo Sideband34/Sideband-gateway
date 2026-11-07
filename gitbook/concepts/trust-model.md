@@ -47,4 +47,4 @@ Transports (Bluetooth, LAN WebSocket) move opaque frames. They never sign or int
 - Key theft. Anyone with the payer's voucher key can sign vouchers.
 - Legal or compliance questions. This is a Testnet prototype.
 
-See [Threat model](../security/threat-model.md).
+See the repository [security notes](https://github.com/Sideband34/Sideband-gateway/blob/main/docs/SECURITY.md).

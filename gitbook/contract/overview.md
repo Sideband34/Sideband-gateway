@@ -67,4 +67,4 @@ SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 \
 cargo test
 ```
 
-`stellar contract build` is the canonical build. Three build methods produced three different wasm hashes during the Testnet run, so no reproducible build is claimed. See [Testnet evidence](../evidence/testnet-evidence.md#wasm-hashes-differ-by-build-method).
+`stellar contract build` is the canonical build. Three build methods produced three different wasm hashes during the Testnet run, so no reproducible build is claimed. See the [deployment evidence](https://github.com/Sideband34/Sideband-channels/blob/main/docs/DEPLOYMENT.md).
