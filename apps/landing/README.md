@@ -13,9 +13,10 @@ npx serve out   # or any static file server
 
 Sideband is **not** listed on the App Store or Google Play. By default the download section shows:
 
-- **Android:** "Download for Android (beta APK)", linking to
-  [GitHub Releases of Sideband-mobile](https://github.com/Sideband34/Sideband-mobile/releases),
-  where tagged builds are attached by that repo's release workflow.
+- **Android:** "Download for Android", linking straight to
+  `https://github.com/Sideband34/Sideband-mobile/releases/latest/download/sideband-android.apk`
+  (the fixed asset name that repo's release workflow publishes on every `v*` tag), plus
+  "All releases", the SHA-256 file and a short "How to install an APK" help.
 - **iOS:** a "coming soon" state with no link.
 
 Official store badges render only when a real listing exists and these build-time variables are set:

@@ -18,6 +18,15 @@ export interface GatewayConfig {
   creditAllowanceStroops: bigint;
   rateLimitBurst: number;
   rateLimitPerSec: number;
+  /**
+   * Default settlement kind. `settle` withdraws and keeps the channel open
+   * (long-running providers, several sessions per channel); `close` is terminal.
+   */
+  settleMode: 'settle' | 'close';
+  /** If > 0, settle automatically once unsettled value reaches this (stroops). */
+  autoSettleStroops: bigint;
+  /** Interval of the auto-settle / dispute watcher in seconds. */
+  autoSettleIntervalSec: number;
 }
 
 export class ConfigError extends Error {
@@ -54,6 +63,10 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
   };
   const price = amt('PRICE_PER_UNIT', '0.001');
   if (price <= 0n) throw new ConfigError('PRICE_PER_UNIT must be positive');
+  const settleMode = env.SETTLE_MODE ?? 'settle';
+  if (settleMode !== 'settle' && settleMode !== 'close') {
+    throw new ConfigError('SETTLE_MODE must be settle or close');
+  }
   const net = network as GatewayConfig['network'];
   void NETWORK_PASSPHRASES[net];
   return {
@@ -71,5 +84,8 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
     creditAllowanceStroops: amt('CREDIT_ALLOWANCE', '0'),
     rateLimitBurst: int('RATE_LIMIT_BURST', 60),
     rateLimitPerSec: int('RATE_LIMIT_PER_SEC', 20),
+    settleMode,
+    autoSettleStroops: amt('AUTO_SETTLE_AMOUNT', '0'),
+    autoSettleIntervalSec: Math.max(1, int('AUTO_SETTLE_INTERVAL_SEC', 60)),
   };
 }

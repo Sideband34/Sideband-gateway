@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import Home from '@/app/page';
 import { Download } from '@/components/Download';
 import { formatAmount, HeroDemo } from '@/components/HeroDemo';
-import { APK_RELEASES_URL, REPOS } from '@/lib/site';
+import { APK_LATEST_URL, APK_RELEASES_URL, APK_SHA256_URL, REPOS } from '@/lib/site';
 import { parseStoreUrl, storeLinksFromEnv } from '@/lib/stores';
 
 vi.mock('next/link', () => ({
@@ -119,17 +119,27 @@ describe('home sections', () => {
 });
 
 describe('download options', () => {
-  it('without store env vars: no store links, beta APK on GitHub Releases, iOS coming soon', () => {
+  it('without store env vars: direct latest APK download, all releases, install help, iOS soon', () => {
     vi.stubEnv('NEXT_PUBLIC_APP_STORE_URL', '');
     vi.stubEnv('NEXT_PUBLIC_PLAY_STORE_URL', '');
     const { container } = render(<Download />);
     expect(hrefs(container).some((h) => STORE_RE.test(h))).toBe(false);
     expect(container.querySelector('img')).toBeNull();
-    expect(screen.getByRole('link', { name: /Download for Android \(beta APK\)/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Download for Android/ })).toHaveAttribute(
+      'href',
+      APK_LATEST_URL,
+    );
+    // Fixed asset name published by Sideband-mobile's release workflow.
+    expect(APK_LATEST_URL).toBe(
+      'https://github.com/Sideband34/Sideband-mobile/releases/latest/download/sideband-android.apk',
+    );
+    expect(screen.getByRole('link', { name: 'All releases' })).toHaveAttribute(
       'href',
       APK_RELEASES_URL,
     );
-    expect(APK_RELEASES_URL).toBe('https://github.com/Sideband34/Sideband-mobile/releases');
+    expect(screen.getByRole('link', { name: /SHA-256/ })).toHaveAttribute('href', APK_SHA256_URL);
+    expect(screen.getByText('How to install an APK')).toBeInTheDocument();
+    expect(container).toHaveTextContent(/install unknown apps/);
     expect(screen.getByText('iOS — coming soon')).toBeInTheDocument();
   });
 
@@ -147,7 +157,7 @@ describe('download options', () => {
       'https://apps.apple.com/app/id000',
     );
     expect(screen.getByRole('link', { name: 'Get it on Google Play' })).toBeInTheDocument();
-    expect(screen.queryByText(/beta APK/)).toBeNull();
+    expect(screen.queryByRole('link', { name: /Download for Android/ })).toBeNull();
     expect(screen.queryByText(/coming soon/)).toBeNull();
   });
 

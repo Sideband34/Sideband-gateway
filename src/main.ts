@@ -4,7 +4,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { RateLimiter } from './http/ratelimit.js';
-import { Keypair, rpc } from '@stellar/stellar-sdk';
+import { Keypair } from '@stellar/stellar-sdk';
 import {
   InMemoryChannelAdapter,
   NETWORK_PASSPHRASES,
@@ -19,6 +19,7 @@ import {
   SqliteNonceStore,
   SqliteSessionStore,
   SqliteVoucherStore,
+  SqliteIntentStore,
   openDb,
 } from './replay/sqlite.js';
 import { SettlementService } from './settlement/service.js';
@@ -39,8 +40,9 @@ function need(k: string): string {
 // UNVERIFIED against a live network: see README. Default is the labeled test adapter.
 const adapter = useSoroban
   ? new SorobanChannelAdapter({
-      client: new RpcSorobanClient(
-        new rpc.Server(need('SOROBAN_RPC_URL')),
+      // forUrl: the RPC server must come from the channels package's own SDK copy (two copies cannot share XDR objects).
+      client: RpcSorobanClient.forUrl(
+        need('SOROBAN_RPC_URL'),
         NETWORK_PASSPHRASES[config.network],
         kp.publicKey(),
       ),
@@ -57,7 +59,7 @@ const gateway = new ProviderGateway({
   adapter,
   vouchers,
   nonces: config.dbPath === ':memory:' ? new InMemoryNonceStore() : new SqliteNonceStore(db),
-  settlement: new SettlementService(adapter, vouchers),
+  settlement: new SettlementService(adapter, vouchers, new SqliteIntentStore(db)),
   now,
   sessions: new SqliteSessionStore(db),
 });
@@ -89,15 +91,37 @@ const server = createHttpServer(gateway, {
 });
 server.listen(config.port, config.host, () => {
   console.log(
-    `sideband-gateway (TEST ADAPTER, ${config.network}) on ${config.host}:${config.port}`,
+    `sideband-gateway (${useSoroban ? 'SOROBAN ADAPTER' : 'TEST ADAPTER'}, ${config.network}) on ${config.host}:${config.port}`,
   );
   console.log(`provider public key: ${kp.publicKey()}`);
 });
+
+// Long-running providers: withdraw with `settle` once unsettled value reaches
+// AUTO_SETTLE_AMOUNT, and answer a payer close_start with our highest voucher.
+let autoSettle: NodeJS.Timeout | undefined;
+if (config.autoSettleStroops > 0n) {
+  let busy = false;
+  autoSettle = setInterval(() => {
+    if (busy) return;
+    busy = true;
+    gateway
+      .settleDue(config.autoSettleStroops)
+      .then((intents) => {
+        for (const i of intents) console.log(`auto ${i.kind} ${i.channelId}: ${i.state}`);
+      })
+      .catch((e: unknown) => console.error('auto-settle failed:', (e as Error).message))
+      .finally(() => {
+        busy = false;
+      });
+  }, config.autoSettleIntervalSec * 1000);
+  autoSettle.unref();
+}
 
 let stopping = false;
 async function stop(signal: string) {
   if (stopping) return;
   stopping = true;
+  if (autoSettle) clearInterval(autoSettle);
   console.log(`${signal}: shutting down`);
   const intents = await gateway.shutdown();
   console.log(`prepared ${intents.length} settlement intent(s)`);

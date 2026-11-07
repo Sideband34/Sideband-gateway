@@ -15,6 +15,19 @@ describe('config', () => {
     expect(() => loadConfig({ PRICE_PER_UNIT: '1e3' })).toThrow();
     expect(loadConfig({ PRICE_PER_UNIT: '0.5' }).pricePerUnitStroops).toBe(5_000_000n);
   });
+  it('settlement mode and auto-settle', () => {
+    const d = loadConfig({});
+    expect(d).toMatchObject({
+      settleMode: 'settle',
+      autoSettleStroops: 0n,
+      autoSettleIntervalSec: 60,
+    });
+    expect(loadConfig({ SETTLE_MODE: 'close' }).settleMode).toBe('close');
+    expect(() => loadConfig({ SETTLE_MODE: 'yolo' })).toThrow(/SETTLE_MODE/);
+    expect(loadConfig({ AUTO_SETTLE_AMOUNT: '0.5' }).autoSettleStroops).toBe(5_000_000n);
+    expect(() => loadConfig({ AUTO_SETTLE_AMOUNT: 'x' })).toThrow();
+    expect(loadConfig({ AUTO_SETTLE_INTERVAL_SEC: '0' }).autoSettleIntervalSec).toBe(1);
+  });
 });
 
 describe('canonicalJson (parity with sideband-protocol Dart)', () => {
