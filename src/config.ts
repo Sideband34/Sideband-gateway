@@ -1,4 +1,5 @@
 import { NETWORK_PASSPHRASES, parseAmount } from '@sideband/channels';
+import { DEFAULT_SERVICE_ID, resolveService } from './services/registry.js';
 
 export interface GatewayConfig {
   /** Network NAME used on the wire ("testnet"). Public network is refused. */
@@ -61,7 +62,14 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
       throw new ConfigError(`${k} is not a valid amount`);
     }
   };
-  const price = amt('PRICE_PER_UNIT', '0.001');
+  const selectedService = (() => {
+    try {
+      return resolveService(env.SERVICE_ID ?? DEFAULT_SERVICE_ID);
+    } catch (e) {
+      throw new ConfigError((e as Error).message);
+    }
+  })();
+  const price = amt('PRICE_PER_UNIT', selectedService.price);
   if (price <= 0n) throw new ConfigError('PRICE_PER_UNIT must be positive');
   const settleMode = env.SETTLE_MODE ?? 'settle';
   if (settleMode !== 'settle' && settleMode !== 'close') {
@@ -74,9 +82,9 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
     host: env.HOST ?? '127.0.0.1',
     port: int('PORT', 3001),
     dbPath: env.DB_PATH ?? ':memory:',
-    serviceId: env.SERVICE_ID ?? 'demo-text-words',
+    serviceId: selectedService.id,
     currency: env.CURRENCY ?? 'TEST-TOKEN',
-    unit: env.UNIT ?? 'word',
+    unit: env.UNIT ?? selectedService.unit,
     pricePerUnitStroops: price,
     maxSessionUnits: int('MAX_SESSION_UNITS', 1000),
     offerTtlSec: int('OFFER_TTL_SEC', 300),
