@@ -3,6 +3,7 @@ import {
   NETWORK_PASSPHRASES,
   acceptVoucher,
   formatAmount,
+  parseAmount,
   type ChannelAdapter,
   type ChannelBinding,
   type SettlementIntent,
@@ -14,7 +15,8 @@ import { GatewayError } from './errors.js';
 import { signManifest, type ManifestSigner, type SignedManifest } from './auth/manifest.js';
 import { UsageMeter, MeterError } from './metering/meter.js';
 import type { NonceStore } from './replay/nonces.js';
-import { runDemo, countWords, MAX_INPUT_CHARS } from './services/demo.js';
+import { resolveService } from './services/registry.js';
+import { InvalidServiceInputError, type MeteredService } from './services/types.js';
 import { SettlementService, type SettlementKind } from './settlement/service.js';
 
 export interface GatewayDeps {
@@ -31,6 +33,8 @@ export interface GatewayDeps {
   allowedPayers?: ReadonlySet<string>;
   /** Durable session/meter state. Defaults to memory (lost on restart). */
   sessions?: SessionStore;
+  /** Metered service implementation. Defaults to the service selected by `config.serviceId`. */
+  service?: MeteredService;
 }
 
 type Phase = 'offered' | 'active' | 'closed';
@@ -115,9 +119,20 @@ export class ProviderGateway {
   private shuttingDown = false;
 
   private readonly store: SessionStore;
+  private readonly service: MeteredService;
+  private readonly serviceId: string;
+  private readonly unit: string;
+  private readonly pricePerUnitStroops: bigint;
 
   constructor(private readonly d: GatewayDeps) {
     this.store = d.sessions ?? new InMemorySessionStore();
+    this.service = d.service ?? resolveService(d.config.serviceId);
+    const customOverride = d.service !== undefined && d.service.id !== d.config.serviceId;
+    this.serviceId = customOverride ? this.service.id : d.config.serviceId;
+    this.unit = customOverride ? this.service.unit : d.config.unit;
+    this.pricePerUnitStroops = customOverride
+      ? parseAmount(this.service.price)
+      : d.config.pricePerUnitStroops;
   }
 
   private persist(s: Session) {
@@ -145,7 +160,7 @@ export class ProviderGateway {
     let closed = 0;
     const c = this.d.config;
     for (const r of this.store.loadAll()) {
-      const meter = new UsageMeter(c.pricePerUnitStroops, c.maxSessionUnits);
+      const meter = new UsageMeter(this.pricePerUnitStroops, c.maxSessionUnits);
       meter.restore(r.units, r.seq);
       const s: Session = {
         id: r.id,
@@ -202,11 +217,11 @@ export class ProviderGateway {
     const now = this.d.now();
     return signManifest(this.d.signer, {
       schemaVersion: 1,
-      serviceId: c.serviceId,
+      serviceId: this.serviceId,
       providerPublicKey: this.d.signer.publicKey,
       network: c.network,
-      pricePerUnit: formatAmount(c.pricePerUnitStroops),
-      unit: c.unit,
+      pricePerUnit: formatAmount(this.pricePerUnitStroops),
+      unit: this.unit,
       currency: c.currency,
       maxSessionUnits: c.maxSessionUnits,
       issuedAt: now,
@@ -223,17 +238,17 @@ export class ProviderGateway {
       id,
       phase: 'offered',
       offerExpiresAt: expiresAt,
-      meter: new UsageMeter(c.pricePerUnitStroops, c.maxSessionUnits),
+      meter: new UsageMeter(this.pricePerUnitStroops, c.maxSessionUnits),
     });
     this.persist(this.sessions.get(id) as Session);
     return {
       type: 'service_offer',
       v: 1,
       session: id,
-      serviceId: c.serviceId,
+      serviceId: this.serviceId,
       providerPublicKey: this.d.signer.publicKey,
-      pricePerUnit: formatAmount(c.pricePerUnitStroops),
-      unit: c.unit,
+      pricePerUnit: formatAmount(this.pricePerUnitStroops),
+      unit: this.unit,
       currency: c.currency,
       network: c.network,
       maxSessionUnits: c.maxSessionUnits,
@@ -340,7 +355,7 @@ export class ProviderGateway {
     return { cumulative: r.cumulative, delta: r.delta, status: 'COMMITMENT_ACCEPTED_NOT_SETTLED' };
   }
 
-  /** Metered demo call. Refuses work not covered by vouchers (+ allowance). */
+  /** Metered service call. Refuses work not covered by vouchers (+ allowance). */
   serve(sessionId: string, text: string) {
     return this.locked(sessionId, async () => {
       if (this.shuttingDown) throw new GatewayError('shutting_down', 'Provider is shutting down');
@@ -348,24 +363,61 @@ export class ProviderGateway {
       if (s.phase !== 'active' || !s.channelRef) {
         throw new GatewayError('bad_state', `Session is ${s.phase}`);
       }
-      if (text.length > MAX_INPUT_CHARS)
-        throw new GatewayError('invalid_request', 'input too large');
-      const units = countWords(text);
-      if (units === 0) throw new GatewayError('invalid_request', 'empty input');
-      if (!s.meter.canRecord(units)) throw new GatewayError('unit_cap', 'Session unit cap reached');
-      const newOwed = s.meter.owed + s.meter.pricePerUnit * BigInt(units);
-      const covered = await this.sessionCommitted(s);
-      if (newOwed > covered + this.d.config.creditAllowanceStroops) {
-        // Wire amounts are CHANNEL cumulative (what the payer signs): the
-        // session baseline plus this session's owed / committed value.
-        const base = s.baseline ?? 0n;
-        throw new GatewayError('payment_required', 'Voucher does not cover this request', {
-          requiredCumulative: formatAmount(base + newOwed),
-          currentCumulative: formatAmount(base + covered),
-          sessionOwed: formatAmount(newOwed),
-        });
+
+      const checkAllowanceAndCap = async (units: number) => {
+        if (!Number.isSafeInteger(units) || units <= 0) {
+          throw new GatewayError('invalid_request', 'empty input');
+        }
+        if (!s.meter.canRecord(units)) {
+          throw new GatewayError('unit_cap', 'Session unit cap reached');
+        }
+        const newOwed = s.meter.owed + s.meter.pricePerUnit * BigInt(units);
+        const covered = await this.sessionCommitted(s);
+        if (newOwed > covered + this.d.config.creditAllowanceStroops) {
+          // Wire amounts are CHANNEL cumulative (what the payer signs): the
+          // session baseline plus this session's owed / committed value.
+          const base = s.baseline ?? 0n;
+          throw new GatewayError('payment_required', 'Voucher does not cover this request', {
+            serviceId: this.serviceId,
+            unit: this.unit,
+            pricePerUnit: formatAmount(s.meter.pricePerUnit),
+            requiredUnits: s.meter.units + units,
+            requiredCumulative: formatAmount(base + newOwed),
+            currentCumulative: formatAmount(base + covered),
+            sessionOwed: formatAmount(newOwed),
+          });
+        }
+      };
+
+      const wrapServiceError = (e: unknown): never => {
+        if (e instanceof GatewayError) throw e;
+        if (e instanceof InvalidServiceInputError || e instanceof RangeError) {
+          throw new GatewayError('invalid_request', e.message);
+        }
+        throw e;
+      };
+
+      if (this.service.measure) {
+        let preUnits: number;
+        try {
+          preUnits = this.service.measure({ text });
+        } catch (e) {
+          return wrapServiceError(e);
+        }
+        await checkAllowanceAndCap(preUnits);
       }
-      const out = runDemo(text);
+
+      let out: { output: string; units: number };
+      try {
+        out = await this.service.handle({ text });
+      } catch (e) {
+        return wrapServiceError(e);
+      }
+
+      if (!this.service.measure) {
+        await checkAllowanceAndCap(out.units);
+      }
+
       try {
         s.meter.record(out.units);
       } catch (e) {

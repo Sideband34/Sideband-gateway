@@ -35,8 +35,9 @@ What is inside:
   16 KiB body limit, documented error schema and request ids.
 - **Voucher acceptance** via `@sideband/channels` (ed25519, domain separation, atomic
   compare-and-swap) with durable SQLite voucher, nonce and session stores that survive restart.
-- **Metered demo service**: per-word text processing that refuses unpaid work with HTTP 402, and
-  a usage meter that reports payer/provider discrepancies.
+- **Metered demo services** (`src/services`): pluggable `MeteredService` abstraction selected via
+  `SERVICE_ID` (`demo-text-words` billed per `word` at `0.001`, and `demo-digest-kb` billed per
+  `kb` at `0.005`), refusing unpaid work with HTTP 402 and reporting payer/provider discrepancies.
 - **Settlement preparation**: intents move `CREATED → AUTHORIZED → SUBMITTED`, `RECONCILING`
   after a timeout, `CONFIRMED` only with finality evidence for the right network.
 - **Auth and limits**: per-session HMAC bearer tokens, an admin token for settle/status, and
@@ -99,6 +100,27 @@ npm run lint && npm run typecheck && npm test && npm run build   # static export
 
 The site never shows store links unless real listings are configured; see
 [`apps/landing/README.md`](./apps/landing/README.md).
+
+### Selecting or adding a metered service
+
+Select a built-in service with `SERVICE_ID` (its default `unit` and `price` are reflected in
+`/.well-known/sideband-service.json`, `service_offer` frames, and HTTP `402` responses unless
+overridden via `UNIT` / `PRICE_PER_UNIT`):
+
+| `SERVICE_ID` | Unit | Default price | Behavior |
+|---|---|---|---|
+| `demo-text-words` (default) | `word` | `0.001` | Upper-cases UTF-8 text (up to 2,000 chars) |
+| `demo-digest-kb` | `kb` | `0.005` | Returns `sha256:<hex>` billed per 1,024 UTF-8 bytes (up to 8 KiB) |
+
+To add another service:
+
+1. Implement `MeteredService` (`src/services/types.ts`) with `id`, `unit`, `price`, `handle(request)`,
+   and an optional `measure(request)` pre-flight estimator that throws `InvalidServiceInputError`
+   on invalid input so unpaid `402` requests fail before work executes.
+2. Register the service in `BUILT_IN_SERVICES` (`src/services/registry.ts`) — or pass `{ service }`
+   directly to `new ProviderGateway(...)` in custom runtimes.
+3. Add the service to `SERVICE_CASES` in `tests/services.test.ts` so it runs through the shared
+   metering, `402`, unit-cap, and HTTP test suite.
 
 ## Status
 

@@ -12,6 +12,7 @@ import {
 import { loadConfig } from '../src/config.js';
 import { ProviderGateway, type GatewayDeps, type SessionStore } from '../src/gateway.js';
 import { InMemoryNonceStore, type NonceStore } from '../src/replay/nonces.js';
+import type { MeteredService } from '../src/services/types.js';
 import { SettlementService } from '../src/settlement/service.js';
 
 /** Deterministic SYNTHETIC test keys (public test data, worthless). */
@@ -46,6 +47,7 @@ export interface HarnessOpts {
   channelNetwork?: string;
   newId?: () => string;
   sessions?: SessionStore;
+  service?: MeteredService;
 }
 
 export async function harness(o: HarnessOpts = {}): Promise<Harness> {
@@ -55,7 +57,11 @@ export async function harness(o: HarnessOpts = {}): Promise<Harness> {
   const vouchers = o.vouchers ?? new InMemoryVoucherStore();
   const nonces = o.nonces ?? new InMemoryNonceStore();
   const settlement = new SettlementService(adapter, vouchers);
-  const config = loadConfig({ PRICE_PER_UNIT: '0.001', MAX_SESSION_UNITS: '1000', ...o.env });
+  const config = loadConfig({
+    ...(o.env?.SERVICE_ID ? {} : { PRICE_PER_UNIT: '0.001' }),
+    MAX_SESSION_UNITS: '1000',
+    ...o.env,
+  });
   const deps: GatewayDeps = {
     config,
     signer: { publicKey: providerKp.publicKey(), sign: (m) => providerKp.sign(Buffer.from(m)) },
@@ -67,6 +73,7 @@ export async function harness(o: HarnessOpts = {}): Promise<Harness> {
     ...(o.newId ? { newId: o.newId } : {}),
     ...(o.allowedPayers ? { allowedPayers: o.allowedPayers } : {}),
     ...(o.sessions ? { sessions: o.sessions } : {}),
+    ...(o.service ? { service: o.service } : {}),
   };
   const gw = new ProviderGateway(deps);
   const { binding } = await adapter.open({

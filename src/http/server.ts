@@ -71,7 +71,7 @@ const MeterBody = z
     sampleHash: str.optional(),
   })
   .strict();
-const ServeBody = z.object({ text: z.string().min(1).max(4000) }).strict();
+const ServeBody = z.object({ text: z.string().min(1).max(12_000) }).strict();
 
 class BadRequest extends GatewayError {
   constructor(message: string) {
